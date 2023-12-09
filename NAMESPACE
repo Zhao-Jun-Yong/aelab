@@ -2,6 +2,10 @@
 
 export(calculate_regression)
 export(convert_time)
+export(tidy_licor)
+import(dplyr)
 import(lubridate)
+import(openxlsx)
+import(readxl)
 import(stats)
 import(tibble)

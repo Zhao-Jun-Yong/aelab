@@ -5,7 +5,7 @@ Version: 0.1.0
 Author: Zhao-Jun Yong
 Maintainer: Zhao-Jun Yong <nuannuan0425@gmail.com>
 Description: Calculation of greenhouse gas flux based on data obtained from LI-COR Trace Gas Analyzer.
-Imports: tibble, lubridate, stats
+Imports: tibble, lubridate, stats, dplyr, openxlsx, readxl
 License: GPL (>= 3)
 Encoding: UTF-8
 LazyData: true
