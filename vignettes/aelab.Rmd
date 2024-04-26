@@ -1,0 +1,84 @@
+---
+title: "aelab"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{instruction}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+rmarkdown.html_vignette.check_title = FALSE
+```
+
+
+# Installation
+
+Install `aelab` package from Github. `devtools` need to be install though `install.packges("devtools")`.
+
+```{r}
+library(aelab)
+```
+
+Load other required packages. Install through `install.packages("package_name")` if not already installed.
+
+```{r}
+library(readxl)
+library(tibble)
+library(lubridate)
+library(stats)
+library(dplyr)
+library(openxlsx)
+```
+
+# Load and process data from LI-COR
+
+Unnecessary rows and columns are removed. NaN values of GHG data are removed.
+
+```{r}
+ch4 <- tidy_licor("ch4.xlsx", "ch4")
+ch4[c(1:5), ]
+```
+
+# Convert LI-COR time
+
+Convert the time in LI-COR to match the time in real life (if there are any differences).
+
+```{r}
+ch4 <- convert_time(ch4, min = -15, sec = 30)
+ch4[c(1:5), ]
+```
+
+# Calculate the slope based on the measurement start time
+
+## Method 1: Load from excel
+
+Type the date and time of GHG flux measurement (start time) in excel, then load the file into R.
+
+```{r}
+ref <- read_excel("reference.xlsx")
+ref
+```
+
+Calculation of the slope of methane concentration over time using the `date_time` value in the `ref` data. In the results, `start_time` and `end_time` are the time range of the data used to perform regression. `slope` is the slope and `R-square` is the R^2 of the regression. `reference_time` is the start time of the measurement from the input.
+
+```{r}
+calculate_regression(ch4, ghg = "CH4", reference_time = ref$date_time)
+```
+
+The default duration of measurement is set to `7` minutes, and the number of rows selected to perform regression is `300`. You can modify these values if desired using the input variables `duration_minutes` and `num_rows` according to your needs.
+```{r}
+calculate_regression(ch4, ghg = "CH4", reference_time = ref$date_time,
+                     duration_minutes = 5, num_rows = 300)
+```
+
+## Method 2: Type from R
+
+The start time of measurement can also be input directly into the function. Note that `as.POSIXct()` is necessary.
+
+```{r}
+calculate_regression(ch4, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00 UTC"))
+```

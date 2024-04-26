@@ -1,21 +1,30 @@
+CO2 <- "To remove R CMD note"
+CH4 <- "To remove R CMD note"
+N2O <- "To remove R CMD note"
+
 #' @title tidy_licor
 #' @import lubridate
-#' @import readxl
-#' @import openxlsx
-#' @import dplyr
-#' @description Tidy the data downloaded from LI-COR Trace Gas Analyzer.
+#' @importFrom readxl read_excel
+#' @importFrom openxlsx convertToDateTime
+#' @importFrom dplyr filter
+#' @description Tidy the data downloaded from GHG Analyzer.
 #' @param file_path Directory of file.
 #' @param gas Choose between CO2/CH4 or N2O LI-COR Trace Gas Analyzer, which is "ch4" and "n2o", respectively.
+#' @param analyzer The brand of the analyzer which the data was downloaded from.
 #'@examples
 #'\dontrun{
 #'ch4 <- tidy_licor("ch4.xlsx", "ch4")
 #'}
 #' @export
+#' @rdname aelab-data
+#' @name n2o
+#' @description Created for troubleshooting.
 
-tidy_licor <- function(file_path, gas) {
+tidy_licor <- function(file_path, gas, analyzer = "licor") {
   data <- readxl::read_excel(file_path)
 
-  if (gas == "ch4") {
+  if(analyzer == "licor") {
+    if (gas == "ch4") {
     title <- data[5, c(7:8, 10:11)]
     data <- data[-c(1:6), c(7:8, 10:11)]
     colnames(data) <- title
@@ -23,20 +32,34 @@ tidy_licor <- function(file_path, gas) {
     data$CH4 <- as.numeric(data$CH4)
     data$CO2 <- as.numeric(data$CO2)
     data <- dplyr::filter(data, CH4 != "NaN", CO2 != "NaN")
-  } else if (gas == "n2o") {
+    } else if (gas == "n2o") {
     title <- data[5, c(7:8, 10)]
     data <- data[-c(1:6), c(7:8, 10)]
     colnames(data) <- title
     data <- as.data.frame(data)
     data$N2O <- as.numeric(data$N2O)
     data <- dplyr::filter(data, N2O != "NaN")
-  }
+    }
 
-  data$TIME <- openxlsx::convertToDateTime(data$TIME)
-  data$DATE <- openxlsx::convertToDateTime(data$DATE)
-  data$TIME <- format(data$TIME, "%H:%M:%S")
-  data$DATE <- format(data$DATE, "%Y/%m/%d")
-  data$date_time <- as.POSIXct(paste(data$DATE, data$TIME), format = "%Y/%m/%d %H:%M:%S")
+    data$TIME <- openxlsx::convertToDateTime(data$TIME)
+    data$DATE <- openxlsx::convertToDateTime(data$DATE)
+    data$TIME <- format(data$TIME, "%H:%M:%S")
+    data$DATE <- format(data$DATE, "%Y/%m/%d")
+    data$date_time <- as.POSIXct(paste(data$DATE, data$TIME), format = "%Y/%m/%d %H:%M:%S")
+
+  } else if(analyzer == "lgr"){
+    if (gas == "ch4") {
+      title <- c("date_time", "CH4", "CO2", "TEMP")
+      data <- data[-c(1:2), c(1, 8, 10, 14)]
+      colnames(data) <- title
+      data <- as.data.frame(data)
+      data$CH4 <- as.numeric(data$CH4)
+      data$CO2 <- as.numeric(data$CO2)
+      data <- dplyr::filter(data, CH4 != "NaN", CO2 != "NaN")
+      data$date_time <- sub("\\.\\d+", "", data$date_time)
+      data$date_time <- as.POSIXct(data$date_time, format = "%m/%d/%Y %H:%M:%S")
+    }
+  }
 
   return(data)
 }
@@ -66,13 +89,14 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 }
 
 #' @import tibble
-#' @import stats
+#' @importFrom stats lm
+#' @importFrom stats coef
 #' @import lubridate
 #' @title calculate_regression
 #' @description Calculate the slope of greenhouse gas (GHG) concentration change over time.
 #' @param data Data from the LI-COR Trace Gas Analyzer that has been processed and time-converted.
 #' @param ghg Column name of the file containing data on GHG concentration (e.g., "CH4", "N2O").
-#' @param reference_time The start time at which the measurement took place.
+#' @param reference_time The date and time at which the measurement started.
 #' @param duration_minutes The duration(minutes) of the measurement, default to 7.
 #' @param num_rows The number of rows used to perform the regression, default to 300.
 #'@examples
@@ -113,13 +137,13 @@ calculate_regression <- function(data, ghg, reference_time,
     for (j in 1:(nrow(sorted_data) - num_rows + 1)) {
       selected_data <- sorted_data[j:(j + num_rows - 1), ]
 
-      regression <- lm(as.numeric(selected_data[[ghg]]) ~ seq_along(selected_data[[ghg]]))
+      regression <- stats::lm(as.numeric(selected_data[[ghg]]) ~ seq_along(selected_data[[ghg]]))
 
       r_square <- summary(regression)$r.squared
 
       if (r_square > best_r_square) {
         best_r_square <- r_square
-        best_slope <- coef(regression)[2]
+        best_slope <- stats::coef(regression)[2]
         best_start_time <- selected_data$real_datetime[1]
         best_end_time <- selected_data$real_datetime[length(selected_data$real_datetime)]  # Assign the actual end time
       }
