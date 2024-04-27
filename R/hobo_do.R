@@ -88,11 +88,11 @@ process_weather <- function(file_path, date, zone) {
   #this function process csv file downloaded with specific format
 
   df <- readr::read_csv(file_path)
-  hour <- grep("觀測時間", names(df), ignore.case = TRUE)
-  air_temp <- grep("氣溫", names(df), ignore.case = TRUE)
+  hours <- grep("觀測時間", names(df), ignore.case = TRUE)
+  pressure_hpa <- grep("測站氣壓", names(df), ignore.case = TRUE)
   wind_speed <- grep("風速", names(df), ignore.case = TRUE)
   df <- rbind(df, df)
-  df <- df[-c(1, 26), c(hour, air_temp, wind_speed)]
+  df <- df[-c(1, 26), c(hours, pressure_hpa, wind_speed)]
   colnames(df) <- c("hours", "pressure_hpa", "wind_ms")
   df$hours <- as.numeric(df$hours)
   df$pressure_hpa <- as.numeric(df$pressure_hpa)
