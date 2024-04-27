@@ -1,7 +1,7 @@
 Package: aelab
 Type: Package
 Title: Calculation of Greenhouse Gas Flux
-Version: 0.2.0
+Version: 0.3.0
 Author: Zhao-Jun Yong
 Maintainer: Zhao-Jun Yong <nuannuan0425@gmail.com>
 Description: Calculation of greenhouse gas flux based on data obtained from LI-COR Trace Gas Analyzer.
