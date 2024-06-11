@@ -2,9 +2,14 @@ Package: aelab
 Type: Package
 Title: Calculation of Greenhouse Gas Flux
 Version: 0.3.0
-Author: Zhao-Jun Yong
+Authors@R: person("Zhao-Jun", "Yong", role = c("cre","aut"), email = "nuannuan0425@gmail.com")
 Maintainer: Zhao-Jun Yong <nuannuan0425@gmail.com>
-Description: Calculation of greenhouse gas flux based on data obtained from LI-COR Trace Gas Analyzer.
+Description: This R package aims to provide R functions that facilitate the analysis of data related to ecology, 
+specifically the carbon budget of ecosystems. Currently, the package allow 
+(i) the calculation of greenhouse gas flux based on data obtained from LI-COR Trace Gas Analyzer using the method described in Lin et al. (2024); 
+(ii) the calculation of Dissolved Oxygen (DO) metabolism based on data obtained from Onset HOBO Dissolved Oxygen Data Logger using the method described in Staehr et al. (2010). 
+Lin et al. (2024) <doi:10.1016/j.scitotenv.2024.170768>
+Staehr et al. (2024) <doi:10.4319/lom.2010.8.0628>
 Imports: tibble, lubridate, stats, dplyr, openxlsx, readxl
 License: GPL (>= 3)
 Encoding: UTF-8

@@ -72,6 +72,7 @@ tidy_licor <- function(file_path, gas, analyzer = "licor") {
 #' @param hr Hour(s) to add or subtract.
 #' @param min Minute(s) to add or subtract.
 #' @param sec Second(s) to add or subtract.
+#' @return The input data with a new column in POSIXct format converted based on the input value.
 #'@examples
 #'\dontrun{
 #'ch4 <- convert_time(ch4, day = 1, min = 15)
@@ -93,12 +94,13 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' @importFrom stats coef
 #' @import lubridate
 #' @title calculate_regression
-#' @description Calculate the slope of greenhouse gas (GHG) concentration change over time.
+#' @description Calculate the slope of greenhouse gas (GHG) concentration change over time using simple linear regression.
 #' @param data Data from the LI-COR Trace Gas Analyzer that has been processed and time-converted.
 #' @param ghg Column name of the file containing data on GHG concentration (e.g., "CH4", "N2O").
 #' @param reference_time The date and time at which the measurement started.
-#' @param duration_minutes The duration(minutes) of the measurement, default to 7.
+#' @param duration_minutes The duration  of the measurement, default to 7.
 #' @param num_rows The number of rows used to perform the regression, default to 300.
+#' @return A tibble containing the time range (POSIXct format) of the slope and R2 from the simple linear regression.
 #'@examples
 #'\dontrun{
 #'calculate_regression(data, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00 UTC"))
