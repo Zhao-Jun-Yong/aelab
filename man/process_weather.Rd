@@ -20,7 +20,6 @@ A dataframe.
 Tidy the daily weather data downloaded from weather station in Taiwan.
 }
 \examples{
-\dontrun{
-df <- process_weather("weather/day_one.csv", "2024-01-01", "site_A")
-}
+weather_data_path <- system.file("extdata", "ex_weather.csv", package = "aelab")
+df <- process_weather(weather_data_path, "2024-01-01", "site_A")
 }

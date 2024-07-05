@@ -18,7 +18,6 @@ A dataframe.
 Tidy the data retrieved from HOBO U26 Dissolved Oxygen Data Logger.
 }
 \examples{
-\dontrun{
-df <- process_hobo("data/hobo.csv", "no.1")
-}
+hobo_data_path <- system.file("extdata", "ex_hobo.csv", package = "aelab")
+df <- process_hobo(hobo_data_path, "code_for_logger")
 }

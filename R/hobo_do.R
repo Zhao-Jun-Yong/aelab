@@ -42,10 +42,9 @@ hobo <- "To remove R CMD note"
 #' @param file_path Directory of file.
 #' @param no_hobo The code for the data logger.
 #' @return A dataframe.
-#'@examples
-#'\donttest{
-#'df <- process_hobo("data/hobo.csv", "no.1")
-#'}
+#' @examples
+#' hobo_data_path <- system.file("extdata", "ex_hobo.csv", package = "aelab")
+#' df <- process_hobo(hobo_data_path, "code_for_logger")
 #' @export
 
 process_hobo <- function(file_path, no_hobo) {
@@ -60,8 +59,9 @@ process_hobo <- function(file_path, no_hobo) {
     df$new_variable <- ifelse(grepl("\u4e0a\u5348", df$date_time),
                               "morning", "afternoon")
     df$date_time <- gsub("\u4e0a\u5348|\u4e0b\u5348", "", df$date_time)
-    df$date_time <- gsub("(\\d+)\\u6642(\\d+)\\u5206(\\d+)\\u79d2", "\\1:\\2:\\3",
-                         df$date_time)
+    df$date_time <- gsub("\u6642", ":", df$date_time)
+    df$date_time <- gsub("\u5206", ":", df$date_time)
+    df$date_time <- gsub("\u79d2", "", df$date_time)
     df$date_time <- strptime(df$date_time, format = "%m/%d/%Y %H:%M:%S")
 
     subset_afternoon <- df[df$new_variable == "afternoon" &
@@ -118,18 +118,17 @@ process_hobo <- function(file_path, no_hobo) {
 #' @param zone Code for the region of the weather station.
 #' @return A dataframe.
 #'@examples
-#'\donttest{
-#'df <- process_weather("weather/day_one.csv", "2024-01-01", "site_A")
-#'}
+#' weather_data_path <- system.file("extdata", "ex_weather.csv", package = "aelab")
+#' df <- process_weather(weather_data_path, "2024-01-01", "site_A")
 #' @export
 
 process_weather <- function(file_path, date, zone) {
   #this function process csv file downloaded with specific format
 
   df <- readr::read_csv(file_path)
-  hours <- grep("\u89c0\u6e2c\u6642\u9593", names(df), ignore.case = TRUE)
-  pressure_hpa <- grep("\u6e2c\u7ad9\u6c23\u58d1", names(df), ignore.case = TRUE)
-  wind_speed <- grep("\u98a8\u901f", names(df), ignore.case = TRUE)
+  hours <- grep("\u89c0\u6e2c\u6642\u9593", names(df), ignore.case = F)
+  pressure_hpa <- grep("\u6e2c\u7ad9\u6c23", names(df), ignore.case = F)
+  wind_speed <- grep("\u98a8\u901f", names(df), ignore.case = F)
   df <- rbind(df, df)
   df <- df[-c(1, 26), c(hours, pressure_hpa, wind_speed)]
   colnames(df) <- c("hours", "pressure_hpa", "wind_ms")
@@ -181,10 +180,9 @@ process_weather <- function(file_path, date, zone) {
 #' and the code for the data logger.
 #' @param file_path Directory of file.
 #' @return A dataframe.
-#'@examples
-#'\donttest{
-#'df <- process_info("info.xlsx")
-#'}
+#' @examples
+#' info_data_path <- system.file("extdata", "info.xlsx", package = "aelab")
+#' df <- process_info(info_data_path)
 #' @export
 
 process_info <- function(file_path) {
@@ -198,66 +196,6 @@ process_info <- function(file_path) {
     mutate(no_hobo = as.character(no_hobo))
 
   return(info)
-}
-
-#' @title combine_weather
-#' @importFrom dplyr bind_rows
-#' @description Apply the process_weather function to multiple file at once.
-#' @param file_path Directory of file, also need to include the character in the file name before the date.
-#' @param start_date Start date of the file of daily weather data in yyyy-mm-dd format.
-#' @param end_date End date of the file of daily weather data in yyyy-mm-dd format.
-#' @param zone Code for the region of the weather station.
-#' @return A dataframe.
-#'@examples
-#'\donttest{
-#'df <- combine_weather(file_path = "weather/1B3D5F-", start_date = "2024-01-01",
-#'end_date = "2024-01-07", zone = "site_A")
-#'}
-#' @export
-
-combine_weather <- function(file_path, start_date, end_date, zone) {
-dates <- as.character(seq(as.Date(start_date), as.Date(end_date), by = "day"))
-df <- list()
-
-for (date in dates) {
-  file_name <- paste0(file_path, date, ".csv")
-  df[[date]] <- process_weather(file_name, date, zone)
-}
-
-weather <- dplyr::bind_rows(df)
-return(weather)
-}
-
-#' @title combine_hobo
-#' @importFrom stringr str_replace
-#' @importFrom stringr str_remove
-#' @description Apply the process_hobo function to multiple file at once.
-#' @param file_path Directory of file.
-#' @param file_prefix Specify a prefix that the file names must start with in the file directory.
-#' @return A dataframe.
-#'@examples
-#'\donttest{
-#'df <- combine_hobo(file_path = "data/", file_prefix = "hobo_")
-#'}
-#' @export
-
-combine_hobo <- function(file_path, file_prefix = "no.") {
-
-  file_names <- list.files(file_path, pattern = paste0("^", file_prefix))
-
-  df <- data.frame()
-
-  for (file_name in file_names) {
-    no_hobo <- stringr::str_replace(file_name, paste0("^", file_prefix), "")
-    no_hobo <- stringr::str_remove(no_hobo, ".csv")
-    file <- file.path(file_path, file_name)
-
-    do <- process_hobo(file_path = file, no_hobo = no_hobo)
-
-    df <- rbind(df, do)
-  }
-
-  return(df)
 }
 
 #' @title plot_hobo

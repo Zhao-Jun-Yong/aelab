@@ -20,10 +20,6 @@ rmarkdown.html_vignette.check_title = FALSE
 Install `aelab` package from Github. `devtools` need to be install though `install.packges("devtools")`.
 
 ```{r}
-library(devtools)
-
-install_github("Zhao-Jun-Yong/aelab")
-
 library(aelab)
 ```
 

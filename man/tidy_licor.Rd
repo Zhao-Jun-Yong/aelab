@@ -20,7 +20,6 @@ Return the loaded XLSX file after tidying for further analysis.
 Tidy the data downloaded from GHG Analyzer.
 }
 \examples{
-\dontrun{
-ch4 <- tidy_licor("ch4.xlsx", "ch4")
-}
+ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab")
+tidy_licor(ghg_data_path, "ch4")
 }

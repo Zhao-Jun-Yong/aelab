@@ -19,7 +19,6 @@ the date and time range of the deployment,
 and the code for the data logger.
 }
 \examples{
-\dontrun{
-df <- process_info("info.xlsx")
-}
+info_data_path <- system.file("extdata", "info.xlsx", package = "aelab")
+df <- process_info(info_data_path)
 }

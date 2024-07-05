@@ -13,9 +13,8 @@ N2O <- "To remove R CMD note"
 #' @param analyzer The brand of the analyzer which the data was downloaded from.
 #' @return Return the loaded XLSX file after tidying for further analysis.
 #' @examples
-#' \donttest{
-#' ch4 <- tidy_licor("ch4.xlsx", "ch4")
-#' }
+#' ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab")
+#' tidy_licor(ghg_data_path, "ch4")
 #' @export
 
 tidy_licor <- function(file_path, gas, analyzer = "licor") {
