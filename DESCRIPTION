@@ -1,7 +1,7 @@
 Package: aelab
 Type: Package
 Title: Calculation of Greenhouse Gas Flux
-Version: 0.3.0
+Version: 0.4.0
 Authors@R: person("Zhao-Jun", "Yong", role = c("cre","aut"), email = "nuannuan0425@gmail.com")
 Maintainer: Zhao-Jun Yong <nuannuan0425@gmail.com>
 Description: Facilitate the analysis of data related to ecology, specifically the establishment of carbon budget. 
