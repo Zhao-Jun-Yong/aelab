@@ -12,7 +12,7 @@ Description: Facilitate the analysis of data related to ecology, specifically th
   Staehr et al. (2024) <doi:10.4319/lom.2010.8.0628>.
 Imports: tibble, lubridate, stats, dplyr, openxlsx, readxl, ggplot2, readr, stringr, tidyr
 License: GPL (>= 3)
-Encoding: UTF-82
+Encoding: UTF-8
 RoxygenNote: 7.2.3
 Suggests: knitr, rmarkdown, testthat (>= 3.0.0)
 Config/testthat/edition: 3
