@@ -43,12 +43,8 @@ library(openxlsx)
 Unnecessary rows and columns are removed. NaN values of GHG data are removed.
 
 ```{r}
-system.file("extdata", "ch4.xlsx", package = "aelab", mustWork = T)
-```
-
-
-```{r}
-ch4 <- tidy_licor("ch4.xlsx", "ch4")
+ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab", mustWork = T)
+ch4 <- tidy_licor(ghg_data_path, "ch4")
 ch4[c(1:5), ]
 ```
 
@@ -68,7 +64,8 @@ ch4[c(1:5), ]
 Type the date and time of GHG flux measurement (start time) in excel, then load the file into R.
 
 ```{r}
-ref <- read_excel("reference.xlsx")
+ref_data_path <- system.file("extdata", "reference.xlsx", package = "aelab", mustWork = T)
+ref <- read_excel(ref_data_path)
 ref
 ```
 
@@ -89,5 +86,5 @@ calculate_regression(ch4, ghg = "CH4", reference_time = ref$date_time,
 The start time of measurement can also be input directly into the function. Note that `as.POSIXct()` is necessary.
 
 ```{r}
-calculate_regression(ch4, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00 UTC"))
+calculate_regression(ch4, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00", tz = "UTC"))
 ```
