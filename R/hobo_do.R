@@ -1,27 +1,66 @@
+sunset <- "To remove R CMD note"
+sunrise <- "To remove R CMD note"
+date_time <- "To remove R CMD note"
+temp <- "To remove R CMD note"
+temp_k <- "To remove R CMD note"
+salinity <- "To remove R CMD note"
+c_o2 <- "To remove R CMD note"
+o2_saturation <- "To remove R CMD note"
+pressure_hpa <- "To remove R CMD note"
+wind_ms <- "To remove R CMD note"
+k600 <- "To remove R CMD note"
+sc <- "To remove R CMD note"
+cor_o2_saturation_pressure <- "To remove R CMD note"
+k <- "To remove R CMD note"
+rate_do_change <- "To remove R CMD note"
+depth_m <- "To remove R CMD note"
+flux <- "To remove R CMD note"
+time <- "To remove R CMD note"
+sunrise_time <- "To remove R CMD note"
+sunset_time <- "To remove R CMD note"
+site <- "To remove R CMD note"
+no_hobo <- "To remove R CMD note"
+nep_hr <- "To remove R CMD note"
+daylight_hr <- "To remove R CMD note"
+r_hr <- "To remove R CMD note"
+nep_daytime <- "To remove R CMD note"
+r_daytime <- "To remove R CMD note"
+gpp <- "To remove R CMD note"
+r_day <- "To remove R CMD note"
+nep <- "To remove R CMD note"
+hobo <- "To remove R CMD note"
+
+
+
 #' @title process_hobo
 #' @importFrom lubridate ceiling_date
+#' @importFrom utils read.csv
+#' @importFrom stats na.omit
+#' @importFrom stats aggregate
+#' @importFrom stats time
 #' @description Tidy the data retrieved from HOBO U26 Dissolved Oxygen Data Logger.
 #' @param file_path Directory of file.
 #' @param no_hobo The code for the data logger.
+#' @return A dataframe.
 #'@examples
-#'\dontrun{
+#'\donttest{
 #'df <- process_hobo("data/hobo.csv", "no.1")
 #'}
 #' @export
 
 process_hobo <- function(file_path, no_hobo) {
-  df <- read.csv(file_path, header = F)
+  df <- utils::read.csv(file_path, header = F)
   df <- df[-c(1:2), -c(5:9)]
-  colnames(df) <- c("no","date_time", "do", "temp")
+  colnames(df) <- c("no", "date_time", "do", "temp")
   df <- as.data.frame(df)
-  df <- na.omit(df)
+  df <-  stats::na.omit(df)
 
-  if (any(grepl("上午|下午", df$date_time))) {
+  if (any(grepl("\u4e0a\u5348|\u4e0b\u5348", df$date_time))) {
 
-    df$new_variable <- ifelse(grepl("上午", df$date_time),
+    df$new_variable <- ifelse(grepl("\u4e0a\u5348", df$date_time),
                               "morning", "afternoon")
-    df$date_time <- gsub("上午|下午", "", df$date_time)
-    df$date_time <- gsub("(\\d+)時(\\d+)分(\\d+)秒", "\\1:\\2:\\3",
+    df$date_time <- gsub("\u4e0a\u5348|\u4e0b\u5348", "", df$date_time)
+    df$date_time <- gsub("(\\d+)\\u6642(\\d+)\\u5206(\\d+)\\u79d2", "\\1:\\2:\\3",
                          df$date_time)
     df$date_time <- strptime(df$date_time, format = "%m/%d/%Y %H:%M:%S")
 
@@ -32,8 +71,8 @@ process_hobo <- function(file_path, no_hobo) {
                            format(df$date_time, "%H:%M:%S") >= "12:00:00" &
                            format(df$date_time, "%H:%M:%S") <= "12:59:59", ]
 
-    subset_afternoon$date_time <- subset_afternoon$date_time + hours(12)
-    subset_morning$date_time <- subset_morning$date_time + hours(12) - days(1)
+    subset_afternoon$date_time <- subset_afternoon$date_time + lubridate::hours(12)
+    subset_morning$date_time <- subset_morning$date_time + lubridate::hours(12) - lubridate::days(1)
 
     df[df$new_variable == "afternoon" &
          format(df$date_time, "%H:%M:%S") >= "01:00:00" &
@@ -58,7 +97,7 @@ process_hobo <- function(file_path, no_hobo) {
   df$date_time <- as.factor(lubridate::ceiling_date(
     df$date_time, unit = "30 minutes"))
 
-  tidy_df <- aggregate(cbind(do, temp) ~
+  tidy_df <- stats::aggregate(cbind(do, temp) ~
                          date_time, df,
                        function(x) mean(x, na.rm = TRUE))
   tidy_df <- arrange(tidy_df, date_time)
@@ -69,7 +108,6 @@ process_hobo <- function(file_path, no_hobo) {
 
   return(tidy_df)
 }
-
 #' @title convert_time
 #' @importFrom readr read_csv
 #' @importFrom tidyr fill
@@ -78,8 +116,9 @@ process_hobo <- function(file_path, no_hobo) {
 #' @param file_path Directory of file.
 #' @param date Date of the daily weather data in yyyy-mm-dd format.
 #' @param zone Code for the region of the weather station.
+#' @return A dataframe.
 #'@examples
-#'\dontrun{
+#'\donttest{
 #'df <- process_weather("weather/day_one.csv", "2024-01-01", "site_A")
 #'}
 #' @export
@@ -88,9 +127,9 @@ process_weather <- function(file_path, date, zone) {
   #this function process csv file downloaded with specific format
 
   df <- readr::read_csv(file_path)
-  hours <- grep("觀測時間", names(df), ignore.case = TRUE)
-  pressure_hpa <- grep("測站氣壓", names(df), ignore.case = TRUE)
-  wind_speed <- grep("風速", names(df), ignore.case = TRUE)
+  hours <- grep("\u89c0\u6e2c\u6642\u9593", names(df), ignore.case = TRUE)
+  pressure_hpa <- grep("\u6e2c\u7ad9\u6c23\u58d1", names(df), ignore.case = TRUE)
+  wind_speed <- grep("\u98a8\u901f", names(df), ignore.case = TRUE)
   df <- rbind(df, df)
   df <- df[-c(1, 26), c(hours, pressure_hpa, wind_speed)]
   colnames(df) <- c("hours", "pressure_hpa", "wind_ms")
@@ -133,6 +172,7 @@ process_weather <- function(file_path, date, zone) {
   }
 }
 
+
 #' @title process_info
 #' @importFrom readxl read_excel
 #' @description Import and process the necessary information,
@@ -140,8 +180,9 @@ process_weather <- function(file_path, date, zone) {
 #' the date and time range of the deployment,
 #' and the code for the data logger.
 #' @param file_path Directory of file.
+#' @return A dataframe.
 #'@examples
-#'\dontrun{
+#'\donttest{
 #'df <- process_info("info.xlsx")
 #'}
 #' @export
@@ -166,8 +207,9 @@ process_info <- function(file_path) {
 #' @param start_date Start date of the file of daily weather data in yyyy-mm-dd format.
 #' @param end_date End date of the file of daily weather data in yyyy-mm-dd format.
 #' @param zone Code for the region of the weather station.
+#' @return A dataframe.
 #'@examples
-#'\dontrun{
+#'\donttest{
 #'df <- combine_weather(file_path = "weather/1B3D5F-", start_date = "2024-01-01",
 #'end_date = "2024-01-07", zone = "site_A")
 #'}
@@ -192,8 +234,9 @@ return(weather)
 #' @description Apply the process_hobo function to multiple file at once.
 #' @param file_path Directory of file.
 #' @param file_prefix Specify a prefix that the file names must start with in the file directory.
+#' @return A dataframe.
 #'@examples
-#'\dontrun{
+#'\donttest{
 #'df <- combine_hobo(file_path = "data/", file_prefix = "hobo_")
 #'}
 #' @export
@@ -221,10 +264,10 @@ combine_hobo <- function(file_path, file_prefix = "no.") {
 #' @import ggplot2
 #' @description Plot the dissolved oxygen concentration over time series grouped by different data loggers to observe the variations.
 #' @param df Dataframe produced by process_hobo() function.
-#'@examples
-#'\dontrun{
-#'plot_hobo(df)
-#'}
+#' @return A plot generated by ggplot2.
+#' @examples
+#' data(hobo)
+#' plot_hobo(hobo)
 #' @export
 
 plot_hobo <- function(df) {
@@ -238,10 +281,10 @@ plot_hobo <- function(df) {
 #' @description Calculate the Net Ecosystem Production,
 #' Gross Primary Production and Ecosystem respiration based on the change in dissolved oxygen concentration.
 #' @param df Merged dataframe produced by process_hobo(), process_weather() and process_info() functions.
-#'@examples
-#'\dontrun{
-#'calculate_do(df)
-#'}
+#' @return A dataframe.
+#' @examples
+#' data(hobo)
+#' calculate_do(hobo)
 #' @export
 
 calculate_do <- function(df) {

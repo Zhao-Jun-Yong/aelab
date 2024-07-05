@@ -11,6 +11,9 @@ combine_hobo(file_path, file_prefix = "no.")
 
 \item{file_prefix}{Specify a prefix that the file names must start with in the file directory.}
 }
+\value{
+A dataframe.
+}
 \description{
 Apply the process_hobo function to multiple file at once.
 }

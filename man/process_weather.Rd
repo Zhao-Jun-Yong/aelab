@@ -13,6 +13,9 @@ process_weather(file_path, date, zone)
 
 \item{zone}{Code for the region of the weather station.}
 }
+\value{
+A dataframe.
+}
 \description{
 Tidy the daily weather data downloaded from weather station in Taiwan.
 }

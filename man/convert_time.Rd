@@ -17,11 +17,13 @@ convert_time(data, day = 0, hr = 0, min = 0, sec = 0)
 
 \item{sec}{Second(s) to add or subtract.}
 }
+\value{
+The input data with a new column in POSIXct format converted based on the input value.
+}
 \description{
 Convert the time of the LI-COR Trace Gas Analyzer to match the time in real life.
 }
 \examples{
-\dontrun{
-ch4 <- convert_time(ch4, day = 1, min = 15)
-}
+data(n2o)
+converted_n2o <- convert_time(n2o, min = -10, sec = 5)
 }

@@ -15,6 +15,9 @@ combine_weather(file_path, start_date, end_date, zone)
 
 \item{zone}{Code for the region of the weather station.}
 }
+\value{
+A dataframe.
+}
 \description{
 Apply the process_weather function to multiple file at once.
 }

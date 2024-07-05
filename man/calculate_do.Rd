@@ -9,12 +9,14 @@ calculate_do(df)
 \arguments{
 \item{df}{Merged dataframe produced by process_hobo(), process_weather() and process_info() functions.}
 }
+\value{
+A dataframe.
+}
 \description{
 Calculate the Net Ecosystem Production,
 Gross Primary Production and Ecosystem respiration based on the change in dissolved oxygen concentration.
 }
 \examples{
-\dontrun{
-calculate_do(df)
-}
+data(hobo)
+calculate_do(hobo)
 }

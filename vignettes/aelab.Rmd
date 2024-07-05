@@ -20,6 +20,10 @@ rmarkdown.html_vignette.check_title = FALSE
 Install `aelab` package from Github. `devtools` need to be install though `install.packges("devtools")`.
 
 ```{r}
+library(devtools)
+
+install_github("Zhao-Jun-Yong/aelab")
+
 library(aelab)
 ```
 
@@ -37,6 +41,11 @@ library(openxlsx)
 # Load and process data from LI-COR
 
 Unnecessary rows and columns are removed. NaN values of GHG data are removed.
+
+```{r}
+system.file("extdata", "ch4.xlsx", package = "aelab", mustWork = T)
+```
+
 
 ```{r}
 ch4 <- tidy_licor("ch4.xlsx", "ch4")

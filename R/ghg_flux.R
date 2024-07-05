@@ -11,14 +11,12 @@ N2O <- "To remove R CMD note"
 #' @param file_path Directory of file.
 #' @param gas Choose between CO2/CH4 or N2O LI-COR Trace Gas Analyzer, which is "ch4" and "n2o", respectively.
 #' @param analyzer The brand of the analyzer which the data was downloaded from.
-#'@examples
-#'\dontrun{
-#'ch4 <- tidy_licor("ch4.xlsx", "ch4")
-#'}
+#' @return Return the loaded XLSX file after tidying for further analysis.
+#' @examples
+#' \donttest{
+#' ch4 <- tidy_licor("ch4.xlsx", "ch4")
+#' }
 #' @export
-#' @rdname aelab-data
-#' @name n2o
-#' @description Created for troubleshooting.
 
 tidy_licor <- function(file_path, gas, analyzer = "licor") {
   data <- readxl::read_excel(file_path)
@@ -73,10 +71,9 @@ tidy_licor <- function(file_path, gas, analyzer = "licor") {
 #' @param min Minute(s) to add or subtract.
 #' @param sec Second(s) to add or subtract.
 #' @return The input data with a new column in POSIXct format converted based on the input value.
-#'@examples
-#'\dontrun{
-#'ch4 <- convert_time(ch4, day = 1, min = 15)
-#'}
+#' @examples
+#' data(n2o)
+#' converted_n2o <- convert_time(n2o, min = -10, sec = 5)
 #' @export
 
 convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
@@ -100,15 +97,15 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' @param reference_time The date and time at which the measurement started.
 #' @param duration_minutes The duration  of the measurement, default to 7.
 #' @param num_rows The number of rows used to perform the regression, default to 300.
-#' @return A tibble containing the time range (POSIXct format) of the slope and R2 from the simple linear regression.
-#'@examples
-#'\dontrun{
-#'calculate_regression(data, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00 UTC"))
-#'}
+#' @return A tibble containing the time range (POSIXct format) of the slope and R2 (both numeric) from the simple linear regression.
+#' @examples
+#' data(n2o)
+#' calculate_regression(n2o, "N2O", as.POSIXct("2023-05-04 09:16:15", tz = "UTC"))
 #' @export
 
 calculate_regression <- function(data, ghg, reference_time,
                                  duration_minutes = 7, num_rows = 300) {
+
 
   results <- tibble(
     reference_time = character(),
@@ -118,7 +115,14 @@ calculate_regression <- function(data, ghg, reference_time,
     end_time = POSIXct()
   )
 
-  data$real_datetime <- force_tz(data$real_datetime, tzone = "Asia/Taipei")
+  # Handle the situation when the input data was not converted using `convert_time()`
+  if (!"real_datetime" %in% colnames(data) && "date_time" %in% colnames(data)) {
+    data$real_datetime <- data$date_time
+  } else{
+    data$real_datetime <- lubridate::force_tz(data$real_datetime, tzone = "Asia/Taipei")
+  }
+
+  # Make sure the time zone is the same
   reference_time <- lubridate::force_tz(reference_time, tzone = "Asia/Taipei")
 
   for (i in seq_along(reference_time)) {
@@ -165,3 +169,4 @@ calculate_regression <- function(data, ghg, reference_time,
 
   return(results)
 }
+

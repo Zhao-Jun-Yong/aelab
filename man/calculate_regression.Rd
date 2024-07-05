@@ -19,15 +19,17 @@ calculate_regression(
 
 \item{reference_time}{The date and time at which the measurement started.}
 
-\item{duration_minutes}{The duration(minutes) of the measurement, default to 7.}
+\item{duration_minutes}{The duration  of the measurement, default to 7.}
 
 \item{num_rows}{The number of rows used to perform the regression, default to 300.}
 }
+\value{
+A tibble containing the time range (POSIXct format) of the slope and R2 (both numeric) from the simple linear regression.
+}
 \description{
-Calculate the slope of greenhouse gas (GHG) concentration change over time.
+Calculate the slope of greenhouse gas (GHG) concentration change over time using simple linear regression.
 }
 \examples{
-\dontrun{
-calculate_regression(data, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00 UTC"))
-}
+data(n2o)
+calculate_regression(n2o, "N2O", as.POSIXct("2023-05-04 09:16:15", tz = "UTC"))
 }

@@ -11,6 +11,9 @@ process_hobo(file_path, no_hobo)
 
 \item{no_hobo}{The code for the data logger.}
 }
+\value{
+A dataframe.
+}
 \description{
 Tidy the data retrieved from HOBO U26 Dissolved Oxygen Data Logger.
 }

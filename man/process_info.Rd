@@ -9,6 +9,9 @@ process_info(file_path)
 \arguments{
 \item{file_path}{Directory of file.}
 }
+\value{
+A dataframe.
+}
 \description{
 Import and process the necessary information,
 including the sunrise and sunset times of the day,
