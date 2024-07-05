@@ -6,8 +6,8 @@ Authors@R: person("Zhao-Jun", "Yong", role = c("cre","aut"), email = "nuannuan04
 Maintainer: Zhao-Jun Yong <nuannuan0425@gmail.com>
 Description: Facilitate the analysis of data related to ecology, specifically the establishment of carbon budget. 
   Currently, the package allows the below analysis.
-  (i) the calculation of greenhouse gas flux based on data obtained from Trace Gas Analyzer (LI-COR) using the method described in Lin et al. (2024).
-  (ii) the calculation of Dissolved Oxygen (DO) metabolism based on data obtained from Dissolved Oxygsystem.file()en Data Logger (Onset) using the method described in Staehr et al. (2010). 
+  (i) the calculation of greenhouse gas flux based on data obtained from trace gas analyzer using the method described in Lin et al. (2024).
+  (ii) the calculation of Dissolved Oxygen (DO) metabolism based on data obtained from dissolved oxygen data logger using the method described in Staehr et al. (2010). 
   Lin et al. (2024) <doi:10.1016/j.scitotenv.2024.170768>.
   Staehr et al. (2024) <doi:10.4319/lom.2010.8.0628>.
 Imports: tibble, lubridate, stats, dplyr, openxlsx, readxl, ggplot2, readr, stringr, tidyr
