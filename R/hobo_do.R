@@ -101,7 +101,8 @@ process_hobo <- function(file_path, no_hobo) {
                          date_time, df,
                        function(x) mean(x, na.rm = TRUE))
   tidy_df <- arrange(tidy_df, date_time)
-  tidy_df$date_time <- as.POSIXct(tidy_df$date_time)
+  tidy_df$date_time <- as.character(tidy_df$date_time)
+  tidy_df$date_time <- as.POSIXct(tidy_df$date_time, format = "%Y-%m-%d %H:%M:%S")
   tidy_df$date_time <- force_tz(tidy_df$date_time,
                                 tzone = "Asia/Taipei")
   tidy_df$no_hobo <- {{no_hobo}}
