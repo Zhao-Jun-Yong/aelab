@@ -10,7 +10,7 @@ Description: Facilitate the analysis of data related to ecology, specifically th
   (ii) the calculation of Dissolved Oxygen (DO) metabolism based on data obtained from dissolved oxygen data logger using the method described in Staehr et al. (2010). 
   Lin et al. (2024) <doi:10.1016/j.scitotenv.2024.170768>.
   Staehr et al. (2010) <doi:10.4319/lom.2010.8.0628>.
-Imports: tibble, lubridate, stats, dplyr, openxlsx, readxl, ggplot2, readr, tidyr
+Imports: tibble, lubridate, stats, dplyr, openxlsx, readxl, ggplot2, readr, tidyr, stringr
 License: GPL (>= 3)
 Encoding: UTF-8
 RoxygenNote: 7.2.3

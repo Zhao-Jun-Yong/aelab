@@ -9,3 +9,5 @@ Install the development version from Github.
 install.packges("devtools")
 install_github("Zhao-Jun-Yong/aelab")
 ```
+
+You can learn more about them in vignette("aelab").

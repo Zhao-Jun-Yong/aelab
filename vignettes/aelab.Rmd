@@ -17,7 +17,11 @@ rmarkdown.html_vignette.check_title = FALSE
 
 # Installation
 
-Install `aelab` package from Github. `devtools` need to be install though `install.packges("devtools")`.
+The installation of `aelab` package can be done from:
+
+1.  Github, using `install_github("Zhao-Jun-Yong/aelab")`. Noted that devtools need to be install though `install.packges("devtools")`.
+
+2. CRAN, using `install.packges("aelab")`.
 
 ```{r}
 library(aelab)
@@ -34,17 +38,19 @@ library(dplyr)
 library(openxlsx)
 ```
 
-# Load and process data from LI-COR
+# GHG flux calculation
+
+## Load and process data from the gas analyzer
 
 Unnecessary rows and columns are removed. NaN values of GHG data are removed.
 
 ```{r}
 ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab", mustWork = T)
-ch4 <- tidy_licor(ghg_data_path, "ch4")
+ch4 <- tidy_ghg_analyzer(ghg_data_path, "ch4")
 ch4[c(1:5), ]
 ```
 
-# Convert LI-COR time
+## Convert LI-COR time
 
 Convert the time in LI-COR to match the time in real life (if there are any differences).
 
@@ -53,9 +59,9 @@ ch4 <- convert_time(ch4, min = -15, sec = 30)
 ch4[c(1:5), ]
 ```
 
-# Calculate the slope based on the measurement start time
+## Calculate the slope based on the measurement start time
 
-## Method 1: Load from excel
+### Method 1: Load from excel
 
 Type the date and time of GHG flux measurement (start time) in excel, then load the file into R.
 
@@ -77,10 +83,67 @@ calculate_regression(ch4, ghg = "CH4", reference_time = ref$date_time,
                      duration_minutes = 5, num_rows = 300)
 ```
 
-## Method 2: Type from R
+### Method 2: Type directly in R
 
 The start time of measurement can also be input directly into the function. Note that `as.POSIXct()` is necessary.
 
 ```{r}
 calculate_regression(ch4, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00", tz = "UTC"))
 ```
+### Calculate the flux
+
+The flux can now be calculated based on the slope.
+
+```{r}
+results_ch4 <- calculate_regression(ch4, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00", tz = "UTC"))
+flux_ch4$slope <- results_ch4$slope
+flux_ch4$area <- 1 # in square meter
+flux_ch4$volume <- 1 # in litre
+flux_ch4$temp <- 1 # in celcius
+flux_ch4 <- as.tibble(flux_ch4)
+calculate_ghg_flux(flux_ch4)
+```
+
+# NEM calculation
+
+## Load and process data needed
+
+```{r}
+hobo_data_path <- system.file("extdata", "ex_hobo.csv", package = "aelab")
+do <- process_hobo(hobo_data_path, "code_for_logger")
+do[c(1:5), ]
+```
+
+```{r}
+weather_data_path <- system.file("extdata", "ex_weather.csv", package = "aelab")
+weather <- process_weather(weather_data_path, "2024-04-10", "zone_A")
+weather[c(1:5), ]
+```
+
+```{r}
+info_data_path <- system.file("extdata", "info.xlsx", package = "aelab")
+info <- process_info(info_data_path)
+info
+```
+
+```{r}
+data <- merge(weather, do, by = "date_time")
+merged_df <- data %>% 
+  inner_join(info, by = c("zone", "no_hobo"))
+merged_df[c(1:5), ]
+```
+
+## Check the data
+
+```{r}
+plot_hobo(merged_df)
+```
+
+## Calculate GPP and ER
+
+```{r}
+calculate_do(merged_df)
+```
+
+
+
