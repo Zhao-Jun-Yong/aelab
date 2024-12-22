@@ -1,10 +1,10 @@
 Package: aelab
 Type: Package
-Title: Calculation of Greenhouse Gas Flux
-Version: 0.5.0
+Title: R package for aquatic ecology
+Version: 1.0.0
 Authors@R: person("Zhao-Jun", "Yong", role = c("cre","aut"), email = "nuannuan0425@gmail.com")
 Maintainer: Zhao-Jun Yong <nuannuan0425@gmail.com>
-Description: Facilitate the analysis of data related to ecology, specifically the establishment of carbon budget. 
+Description: Facilitate the analysis of data related to aquatic ecology, specifically the establishment of carbon budget. 
   Currently, the package allows the below analysis.
   (i) the calculation of greenhouse gas flux based on data obtained from trace gas analyzer using the method described in Lin et al. (2024).
   (ii) the calculation of Dissolved Oxygen (DO) metabolism based on data obtained from dissolved oxygen data logger using the method described in Staehr et al. (2010). 
