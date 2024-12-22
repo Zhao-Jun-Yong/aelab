@@ -14,7 +14,7 @@ N2O <- "To remove R CMD note"
 #' @return Return the loaded XLSX file after tidying for further analysis.
 #' @examples
 #' ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab")
-#' tidy_licor(ghg_data_path, "ch4")
+#' tidy_ghg_analyzer(ghg_data_path, "ch4")
 #' @export
 
 tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor") {
@@ -233,7 +233,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   s_to_day <- (1/3600)  # seconds to days
   gas_constant <- 0.082  # gas constant
   celsius_to_kelvin <- 273.15  # Celsius to Kelvin conversion
-  µmol_to_mmol <- 0.001  # micromoles to millimoles conversion
+  micro_to_milli <- 0.001  # micromoles to millimoles conversion
 
   # Check if specified columns exist in the data frame
   required_cols <- c(slope, area, volume, temp)
@@ -248,7 +248,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   temp <- data[[temp]]
 
   # Calculate flux
-  data$flux <- (slope * volume * (1/s_to_day) * µmol_to_mmol) /
+  data$flux <- (slope * volume * (1/s_to_day) * micro_to_milli) /
     (gas_constant * (temp + celsius_to_kelvin) * area)
 
   # Set unit of the result

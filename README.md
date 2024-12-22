@@ -1,13 +1,15 @@
 # Overview
-This is an R package built for aquatic ecology data analysis. Currently, the package is capable of: (1) obtaining parameters for GHG flux calculation through the data obtained from LI-COR Trace Gas Analyzer and ABB LGR-ICOS Gas Analyzer; (2) Calculate NEM, GPP and ER through obtained from Onset's HOBO U26-001 data logger.
+
+This is an R package designed for analyzing aquatic ecology data. Currently, the package can: (1) facilitate the calculation of (i) greenhouse gas (GHG) flux in various ecosystems and (ii) net ecosystem production (NEP) in aquatic ecosystems.
 
 # Installation
 
-Install the development version from Github.
+The installation of the `aelab` package can be done from:
 
-```R
-install.packges("devtools")
-install_github("Zhao-Jun-Yong/aelab")
-```
+1. GitHub, using `install_github("Zhao-Jun-Yong/aelab")`. Note that devtools need to be installed through `install.packages("devtools")`.
 
-You can learn more about them in vignette("aelab").
+2. CRAN, using `install.packages("aelab")`.
+
+# Feature
+
+You can learn more about the features in `vignette("aelab")`.

@@ -21,5 +21,5 @@ Tidy the data downloaded from GHG Analyzer.
 }
 \examples{
 ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab")
-tidy_licor(ghg_data_path, "ch4")
+tidy_ghg_analyzer(ghg_data_path, "ch4")
 }

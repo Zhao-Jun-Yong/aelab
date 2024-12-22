@@ -4,18 +4,24 @@
 \alias{calculate_ghg_flux}
 \title{calculate_ghg_flux}
 \usage{
-calculate_ghg_flux(data, ghg, slope, area, volume, temp)
+calculate_ghg_flux(
+  data,
+  slope = "slope",
+  area = "area",
+  volume = "volume",
+  temp = "temp"
+)
 }
 \arguments{
 \item{data}{A data frame containing relevant data with columns for slope, area, volume, and temperature.}
 
 \item{slope}{Name of the column in `data` that contains the slope values of the GHG concentration change (in ppm/s).}
 
-\item{volume}{Name of the column in `data` that contains values of the volume of the chamber.}
+\item{area}{Name of the column in `data` that contains the values of the area of the chamber (in square meter).}
+
+\item{volume}{Name of the column in `data` that contains values of the volume of the chamber (in litre).}
 
 \item{temp}{Name of the column in `data` that contains values of the temperature of the gas (in Celsius).}
-
-\item{areaName}{of the column in `data` that contains the values of the area of the chamber.}
 }
 \value{
 A list containing the calculated flux and its unit.
@@ -30,8 +36,6 @@ data <- data.frame(
   volume = c(10, 15, 12),
   temp = c(25, 30, 22)
 )
-results <- calculate_ghg_flux(data, ghg = "co2",
-slope_col = "slope", area_col = "area",
-volume_col = "volume", temp_col = "temp")
+results <- calculate_ghg_flux(data)
 print(results)
 }

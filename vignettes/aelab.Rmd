@@ -7,29 +7,11 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(warning = FALSE)
 knitr::opts_chunk$set(message = FALSE)
 rmarkdown.html_vignette.check_title = FALSE
-```
-
-
-# Installation
-
-The installation of `aelab` package can be done from:
-
-1.  Github, using `install_github("Zhao-Jun-Yong/aelab")`. Noted that devtools need to be install though `install.packges("devtools")`.
-
-2. CRAN, using `install.packges("aelab")`.
-
-```{r}
 library(aelab)
-```
-
-Load other required packages. Install through `install.packages("package_name")` if not already installed.
-
-```{r}
 library(readxl)
 library(tibble)
 library(lubridate)
@@ -38,32 +20,44 @@ library(dplyr)
 library(openxlsx)
 ```
 
+# Introduction
+
+The goal of achieving net zero emissions by 2050 is a significant driver of research focused on understanding greenhouse gas (GHG) flux dynamics and the autotrophic production of ecosystems. This ambitious target highlights the urgent need to explore how different ecosystems contribute to GHG emissions and how they can be managed to reduce these emissions effectively. To support this research, this R package offers a variety of useful tools designed to facilitate the analysis of data related to GHG flux and production in aquatic environments.
+
 # GHG flux calculation
 
-## Load and process data from the gas analyzer
+Various techniques are used to measure greenhouse gas (GHG) flux, including eddy covariance (EC), the boundary layer method (BLM), and the static chamber method. This study provides R functions specifically designed to analyze data from GHG flux measurements using the static chamber method with a portable gas analyzer.
+ 
+## Load and process the raw data file
 
-Unnecessary rows and columns are removed. NaN values of GHG data are removed.
+First, we need to obtain necessary parameters from the raw data downloaded from the portable gas analyzer. We will remove unnecessary rows and columns and extract the GHG concentrations along with the corresponding date and time recorded by the analyzer using `tidy_ghg_analyzer()`. Additionally, this function will also eliminate any NaN values in the GHG data. Currently, this function supports raw data downloaded from:  
+(i) LI-COR Trace Gas Analyzer (LI-7810 and LI-7820).
+(ii) ABB LGR-ICOS Gas Analyzer (M-GGA-918).
 
 ```{r}
+# The provided file is a raw data file downloaded from 
+# the LI-COR Trace Gas Analyzer
 ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab", mustWork = T)
 ch4 <- tidy_ghg_analyzer(ghg_data_path, "ch4")
-ch4[c(1:5), ]
+ch4[c(1:3), ]
 ```
 
-## Convert LI-COR time
-
-Convert the time in LI-COR to match the time in real life (if there are any differences).
+Sometimes, the date and time recorded by the analyzer do not match the actual date and time we recorded in situ. Therefore, we need to convert the `date_time` column from the previous step to align with the real-life time, if there are any discrepancies:
 
 ```{r}
+# The analyzer's time was assumed to be 
+# 15 minutes and 30 seconds faster than real time
 ch4 <- convert_time(ch4, min = -15, sec = 30)
-ch4[c(1:5), ]
+ch4[c(1:3), c(5:6)]
 ```
 
-## Calculate the slope based on the measurement start time
+## Calculate the slope
+
+We first need to obtain the slope from the linear regression of GHG concentration changes over time within the chamber to calculate the flux. This can be done by defining the measurement time interval, either from a reference file (see Method 1 below) or directly in R (see Method 2 below).
 
 ### Method 1: Load from excel
 
-Type the date and time of GHG flux measurement (start time) in excel, then load the file into R.
+In Excel, enter the date and time when the GHG flux measurement started, then load the file into R. Make sure the column containing the date and time information is formatted in ISO 8601 as `YYYY-MM-DD hh:mm:ss`.
 
 ```{r}
 ref_data_path <- system.file("extdata", "reference.xlsx", package = "aelab", mustWork = T)
@@ -71,54 +65,70 @@ ref <- read_excel(ref_data_path)
 ref
 ```
 
-Calculation of the slope of methane concentration over time using the `date_time` value in the `ref` data. In the results, `start_time` and `end_time` are the time range of the data used to perform regression. `slope` is the slope and `R-square` is the R^2 of the regression. `reference_time` is the start time of the measurement from the input.
+Now, we can perform multiple simple linear regressions on the GHG concentrations, separated by the `date_time` value in the `ref` data, using `calculate_regression()`. The measurement duration, referred to as `duration_minutes`, is set to a default of 7 minutes, and the number of rows used for the regression, also denoted as `duration_minutes`, defaults to 300 rows (which is equivalent to 5 minutes). These values can be modified if desired. 
 
-```{r}
-calculate_regression(ch4, ghg = "CH4", reference_time = ref$date_time)
-```
+When the measurement duration (specified by `duration_minutes`) exceeds the data used for regression (specified by `num_rows`), this function automatically selects the rows with the highest R$^2$ within the defined interval.
 
-The default duration of measurement is set to `7` minutes, and the number of rows selected to perform regression is `300`. You can modify these values if desired using the input variables `duration_minutes` and `num_rows` according to your needs.
+In the output tibble, `start_time` and `end_time` indicate the time range of the data used for the regression. `slope` represents the slope, and `r_square` denotes the R$^2$ value of the regression. `reference_time` is the start time of the measurement from the input.
+
 ```{r}
 calculate_regression(ch4, ghg = "CH4", reference_time = ref$date_time,
-                     duration_minutes = 5, num_rows = 300)
+                     duration_minutes = 7, num_rows = 300)
 ```
 
 ### Method 2: Type directly in R
 
-The start time of measurement can also be input directly into the function. Note that `as.POSIXct()` is necessary.
+The start time of measurement can also be input directly into the function. Please note that the reference_time must be in POSIXct format.
 
 ```{r}
 calculate_regression(ch4, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00", tz = "UTC"))
 ```
-### Calculate the flux
 
-The flux can now be calculated based on the slope.
+## Calculate the flux
+
+The equation we used to calculate the GHG flux was derived from Yong et al. (2024):
+
+$$
+F = \frac{(S \times V \times c)}{R \times T \times A}
+$$
+
+where S is the slope obtained from the linear regression of GHG concentration changes over time (ppm s$^{-1}$), V is the chamber volume (liters), c is the conversion factor from seconds to hours, R is the ideal gas constant (0.082 L atm K$^{−1}$ mol$^{−1}$), T is the temperature inside the chamber (kelvin), and A is the surface area of the chamber (m$^2$).
+
+Therefore, the function `calculate_ghg_flux()` requires a dataframe with columns for the slope, area, volume, and temperature. Note that the units of the parameters must match those described above, resulting in a flux with units of mmol m$^{-2}$ d$^{-1}$.
 
 ```{r}
 results_ch4 <- calculate_regression(ch4, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00", tz = "UTC"))
-flux_ch4$slope <- results_ch4$slope
-flux_ch4$area <- 1 # in square meter
-flux_ch4$volume <- 1 # in litre
-flux_ch4$temp <- 1 # in celcius
-flux_ch4 <- as.tibble(flux_ch4)
+flux_ch4 <- data.frame(
+    slope = results_ch4$slope,
+    area = 1, # in square meter
+    volume = 1, # in litre
+    temp = 1) # in celcius
 calculate_ghg_flux(flux_ch4)
 ```
 
 # NEM calculation
 
-## Load and process data needed
+The change in oxygen concentration in the water reflects the balance between photosynthetic production, respiratory consumption, and physical exchange at the water-atmosphere interface. By measuring dissolved oxygen (DO) concentrations at high frequency with in situ data loggers, we can calculate gross primary production (GPP), ecosystem respiration (ER), and net ecosystem metabolism (NEM), as detailed by Staehr et al. (2010).
+
+## Load and process the raw data file
+
+First, we need to obtain the necessary parameters from the raw data downloaded from the data loggers. We will remove unnecessary rows and columns and extract the dissolved oxygen concentrations and water temperature, along with the corresponding date and time recorded by the logger using `process_hobo()`. This function will also eliminate any NA values in the dataframe. The `no_hobo` input was necessary for further analysis. Currently, it supports raw data downloaded from the Onset HOBO Dissolved Oxygen Data Logger (U26-001).
 
 ```{r}
 hobo_data_path <- system.file("extdata", "ex_hobo.csv", package = "aelab")
-do <- process_hobo(hobo_data_path, "code_for_logger")
-do[c(1:5), ]
+do <- process_hobo(hobo_data_path, no_hobo = "code_for_logger")
+do[c(1:3), ]
 ```
+
+The air pressure and wind speed at the sampling site should be obtained either manually or from a nearby weather station. The `process_weather` function tidies the CSV file downloaded from Taiwan's weather station. In addition to extracting the columns with air pressure and wind speed values, it also duplicates the hourly data to match the half-hourly recorded frequency of the DO concentrations.
 
 ```{r}
 weather_data_path <- system.file("extdata", "ex_weather.csv", package = "aelab")
-weather <- process_weather(weather_data_path, "2024-04-10", "zone_A")
+weather <- process_weather(weather_data_path, date = "2024-04-10", zone = "zone_A")
 weather[c(1:5), ]
 ```
+
+In addition to the previously mentioned parameters, we also needed the water depth, salinity, start and end date and time of the data logger deployment, and the sunrise and sunset times during that period. These parameters can be entered in Excel and then imported into R using `process_info()` to ensure that all necessary parameters are included. The column `zone` corresponds to `process_weather()`, and column `no_hobo` corresponds to `process_hobo()`.
 
 ```{r}
 info_data_path <- system.file("extdata", "info.xlsx", package = "aelab")
@@ -126,24 +136,25 @@ info <- process_info(info_data_path)
 info
 ```
 
+Finally, we can merge the dataframe containing air pressure and wind speed data from `process_weather()` with the processed data downloaded from the data loggers. Next, we will combine this with the other necessary parameters using the `zone` and `no_hobo` columns. We can use the `plot_hobo()` function to inspect the changes in DO concentrations.
+
 ```{r}
 data <- merge(weather, do, by = "date_time")
 merged_df <- data %>% 
   inner_join(info, by = c("zone", "no_hobo"))
-merged_df[c(1:5), ]
-```
-
-## Check the data
-
-```{r}
+merged_df[c(1:3), ]
 plot_hobo(merged_df)
 ```
 
 ## Calculate GPP and ER
 
+GPP and ER can be calculated using `calculate_do()`. NEM (denoted as `nep` in the output dataframe) was calculated by GPP + ER.
+
 ```{r}
 calculate_do(merged_df)
 ```
 
+# Reference
 
-
+Staehr, P. A., Bade, D., Van de Bogert, M. C., Koch, G. R., Williamson, C., Hanson, P., Cole, J. J., & Kratz, T. (2010). Lake metabolism and the diel oxygen technique: State of the science. Limnology and Oceanography: Methods, 8(11), 628–644. https://doi.org/10.4319/lom.2010.8.0628
+Yong, Z.-J., Lin, W.-J., Lin, C.-W., & Lin, H.-J. (2024). Tidal influence on carbon dioxide and methane fluxes from tree stems and soils in mangrove forests. Biogeosciences, 21(22), 5247–5260. https://doi.org/10.5194/bg-21-5247-2024
