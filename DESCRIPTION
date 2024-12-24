@@ -1,6 +1,6 @@
 Package: aelab
 Type: Package
-Title: R package for aquatic ecology
+Title: Data Processing for Aquatic Ecology
 Version: 1.0.0
 Authors@R: person("Zhao-Jun", "Yong", role = c("cre","aut"), email = "nuannuan0425@gmail.com")
 Maintainer: Zhao-Jun Yong <nuannuan0425@gmail.com>

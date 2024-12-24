@@ -1,5 +1,9 @@
 ## Resubmission
 
+* Omit the redundant "R pakcage" from the title.
+
+## Resubmission
+
 This is a resubmission. In this version I have fixed following issues:
 
 * Start the description with "Facilitates the ..." instead of ""This package...".
