@@ -1,9 +1,7 @@
-CO2 <- "To remove R CMD note"
-CH4 <- "To remove R CMD note"
-N2O <- "To remove R CMD note"
+utils::globalVariables(c("CO2", "CH4", "N2O"))
 
 #' @title tidy_ghg_analyzer
-#' @import lubridate
+#' @importFrom lubridate ymd_hms days hours minutes seconds force_tz
 #' @importFrom readxl read_excel
 #' @importFrom openxlsx convertToDateTime
 #' @importFrom dplyr filter
@@ -78,7 +76,6 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor") {
 }
 
 #' @title convert_time
-#' @import lubridate
 #' @description Convert the time of the LI-COR Trace Gas Analyzer to match the time in real life.
 #' @param data Data from the LI-COR Trace Gas Analyzer that had been processed by tidy_licor().
 #' @param day Day(s) to add or subtract.
@@ -96,14 +93,12 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   # Convert 'date_time' column to POSIXct format
   data$date_time <- lubridate::ymd_hms(data$date_time)
 
-  # Add specified time adjustments to the date_time
-  data$real_datetime <- data$date_time + days(day) + hours(hr) + minutes(min) + seconds(sec)
-
-  # Format 'real_datetime' as a string in "YYYY/MM/DD HH:MM:SS"
-  data$real_datetime <- format(data$real_datetime, "%Y/%m/%d %H:%M:%S")
-
-  # Convert the formatted string back to POSIXct
-  data$real_datetime <- as.POSIXct(data$real_datetime, format = "%Y/%m/%d %H:%M:%S")
+  # Add specified time adjustments to the date_time (lubridate preserves POSIXct directly)
+  data$real_datetime <- data$date_time +
+    lubridate::days(day) +
+    lubridate::hours(hr) +
+    lubridate::minutes(min) +
+    lubridate::seconds(sec)
 
   # Return the modified data frame
   return(data)
@@ -113,7 +108,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' @import tibble
 #' @importFrom stats lm
 #' @importFrom stats coef
-#' @import lubridate
+#' @importFrom purrr map_dfr
 #' @title calculate_regression
 #' @description Calculate the slope of greenhouse gas (GHG) concentration change over time using simple linear regression.
 #' @param data Data from the LI-COR Trace Gas Analyzer that has been processed and time-converted.
@@ -130,15 +125,6 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 calculate_regression <- function(data, ghg, reference_time,
                                  duration_minutes = 7, num_rows = 300) {
 
-  # Initialize an empty tibble to store results
-  results <- tibble(
-    reference_time = character(),
-    slope = numeric(),
-    r_square = numeric(),
-    start_time = POSIXct(),
-    end_time = POSIXct()
-  )
-
   # Check if 'real_datetime' exists; if not, use 'date_time' as a fallback
   if (!"real_datetime" %in% colnames(data) && "date_time" %in% colnames(data)) {
     data$real_datetime <- data$date_time
@@ -150,8 +136,8 @@ calculate_regression <- function(data, ghg, reference_time,
   # Ensure the reference time is in the correct timezone
   reference_time <- lubridate::force_tz(reference_time, tzone = "Asia/Taipei")
 
-  # Loop through each reference time to perform regression analysis
-  for (i in seq_along(reference_time)) {
+  # Use map_dfr to iterate through each reference time (avoids O(n^2) rbind)
+  results <- purrr::map_dfr(seq_along(reference_time), function(i) {
     reference_datetime <- reference_time[i]
 
     # Define the start and end time for the regression window
@@ -190,18 +176,15 @@ calculate_regression <- function(data, ghg, reference_time,
       }
     }
 
-    # Append the best results for this reference time to the results tibble
-    results <- rbind(
-      results,
-      tibble(
-        start_time = format(best_start_time, "%Y/%m/%d %H:%M:%S"),
-        end_time = format(best_end_time, "%Y/%m/%d %H:%M:%S"),
-        slope = best_slope,
-        r_square = best_r_square,
-        reference_time = reference_time[i]
-      )
+    # Return the best results for this reference time
+    tibble(
+      start_time = format(best_start_time, "%Y/%m/%d %H:%M:%S"),
+      end_time = format(best_end_time, "%Y/%m/%d %H:%M:%S"),
+      slope = best_slope,
+      r_square = best_r_square,
+      reference_time = reference_time[i]
     )
-  }
+  })
 
   # Return the results tibble containing regression analysis results
   return(results)

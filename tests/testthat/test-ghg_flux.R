@@ -9,7 +9,8 @@ test_that("convert_time adjusts datetime correctly", {
   data <- data.frame(date_time = c("2024/12/16 12:00:00"))
   result <- convert_time(data, hr = 1, min = 30)
 
-  expect_equal(result$real_datetime[1], as.POSIXct("2024-12-16 13:30:00"))
+  # lubridate::ymd_hms() parses as UTC, so compare with UTC timezone
+  expect_equal(result$real_datetime[1], as.POSIXct("2024-12-16 13:30:00", tz = "UTC"))
 })
 
 test_that("calculate_regression returns correct results", {

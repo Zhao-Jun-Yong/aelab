@@ -1,39 +1,17 @@
-sunset <- "To remove R CMD note"
-sunrise <- "To remove R CMD note"
-date_time <- "To remove R CMD note"
-temp <- "To remove R CMD note"
-temp_k <- "To remove R CMD note"
-salinity <- "To remove R CMD note"
-c_o2 <- "To remove R CMD note"
-o2_saturation <- "To remove R CMD note"
-pressure_hpa <- "To remove R CMD note"
-wind_ms <- "To remove R CMD note"
-k600 <- "To remove R CMD note"
-sc <- "To remove R CMD note"
-cor_o2_saturation_pressure <- "To remove R CMD note"
-k <- "To remove R CMD note"
-rate_do_change <- "To remove R CMD note"
-depth_m <- "To remove R CMD note"
-flux <- "To remove R CMD note"
-time <- "To remove R CMD note"
-sunrise_time <- "To remove R CMD note"
-sunset_time <- "To remove R CMD note"
-site <- "To remove R CMD note"
-no_hobo <- "To remove R CMD note"
-nep_hr <- "To remove R CMD note"
-daylight_hr <- "To remove R CMD note"
-r_hr <- "To remove R CMD note"
-nep_daytime <- "To remove R CMD note"
-r_daytime <- "To remove R CMD note"
-gpp <- "To remove R CMD note"
-r_day <- "To remove R CMD note"
-nep <- "To remove R CMD note"
-hobo <- "To remove R CMD note"
+utils::globalVariables(c(
+  "sunset", "sunrise", "date_time", "temp", "temp_k", "salinity",
+  "c_o2", "o2_saturation", "pressure_hpa", "wind_ms", "k600", "sc",
+  "cor_o2_saturation_pressure", "k", "rate_do_change", "depth_m",
+  "flux", "time", "sunrise_time", "sunset_time", "site", "no_hobo",
+  "nep_hr", "daylight_hr", "r_hr", "nep_daytime", "r_daytime",
+  "gpp", "r_day", "nep", "hobo", "do", "date"
+))
 
 
 
 #' @title process_hobo
-#' @importFrom lubridate ceiling_date
+#' @importFrom lubridate ceiling_date hours days force_tz
+#' @importFrom dplyr arrange
 #' @importFrom utils read.csv
 #' @importFrom stats na.omit
 #' @importFrom stats aggregate
@@ -97,8 +75,7 @@ process_hobo <- function(file_path, no_hobo) {
          format(df$date_time, "%H:%M:%S") <= "12:59:59", ] <- subset_morning
 
     # Clean up temporary variables
-    remove(subset_afternoon)
-    remove(subset_morning)
+    rm(subset_afternoon, subset_morning)
     df$new_variable <- NULL  # Remove the new_variable column
 
   } else {
@@ -119,17 +96,17 @@ process_hobo <- function(file_path, no_hobo) {
   tidy_df <- stats::aggregate(cbind(do, temp) ~ date_time, df, function(x) mean(x, na.rm = TRUE))
 
   # Arrange the tidy dataframe by date_time
-  tidy_df <- arrange(tidy_df, date_time)
+  tidy_df <- dplyr::arrange(tidy_df, date_time)
 
   # Convert date_time back to character and then to POSIXct format
   tidy_df$date_time <- as.character(tidy_df$date_time)
   tidy_df$date_time <- as.POSIXct(tidy_df$date_time, format = "%Y-%m-%d %H:%M:%S")
 
   # Set the timezone to Asia/Taipei
-  tidy_df$date_time <- force_tz(tidy_df$date_time, tzone = "Asia/Taipei")
+  tidy_df$date_time <- lubridate::force_tz(tidy_df$date_time, tzone = "Asia/Taipei")
 
   # Add the no_hobo parameter to the tidy dataframe
-  tidy_df$no_hobo <- {{no_hobo}}
+  tidy_df$no_hobo <- no_hobo
 
   # Return the cleaned and aggregated dataframe
   return(tidy_df)
@@ -139,7 +116,7 @@ process_hobo <- function(file_path, no_hobo) {
 #' @title convert_time
 #' @importFrom readr read_csv
 #' @importFrom tidyr fill
-#' @import lubridate
+#' @importFrom lubridate as_datetime days force_tz
 #' @description Tidy the daily weather data downloaded from weather station in Taiwan.
 #' @param file_path Directory of file.
 #' @param date Date of the daily weather data in yyyy-mm-dd format.
@@ -207,7 +184,7 @@ process_weather <- function(file_path, date, zone) {
     # Combine date and time into a single datetime column
     df$date_time <- as.POSIXlt(paste(date, time_sequence), format = "%Y-%m-%d %H:%M:%S", tz = "Asia/Taipei")
     df$date_time <- as.POSIXct(df$date_time)  # Convert to POSIXct for easier manipulation
-    df$date_time <- force_tz(df$date_time, tzone = "Asia/Taipei")  # Ensure timezone is set correctly
+    df$date_time <- lubridate::force_tz(df$date_time, tzone = "Asia/Taipei")  # Ensure timezone is set correctly
 
     # Adjust the last entry's date_time to the next day
     new_date <- lubridate::as_datetime(df$date_time[48])
@@ -217,7 +194,7 @@ process_weather <- function(file_path, date, zone) {
     df$date <- NULL
     df$time <- NULL
     df$hours <- NULL
-    df$zone <- {{zone}}  # Assign the zone parameter to the dataframe
+    df$zone <- zone  # Assign the zone parameter to the dataframe
 
     # Convert the dataframe to a standard data frame format and return it
     return(as.data.frame(df))
@@ -227,6 +204,8 @@ process_weather <- function(file_path, date, zone) {
 
 #' @title process_info
 #' @importFrom readxl read_excel
+#' @importFrom lubridate force_tz
+#' @importFrom dplyr mutate
 #' @description Import and process the necessary information,
 #' including the sunrise and sunset times of the day,
 #' the date and time range of the deployment,
@@ -244,14 +223,13 @@ process_info <- function(file_path) {
   info <- readxl::read_excel(file_path)
 
   # Convert sunrise, sunset, start_date_time, and end_date_time columns to Asia/Taipei timezone
-  info$sunrise <- force_tz(info$sunrise, tzone = "Asia/Taipei")
-  info$sunset <- force_tz(info$sunset, tzone = "Asia/Taipei")
-  info$start_date_time <- force_tz(info$start_date_time, tzone = "Asia/Taipei")
-  info$end_date_time <- force_tz(info$end_date_time, tzone = "Asia/Taipei")
+  info$sunrise <- lubridate::force_tz(info$sunrise, tzone = "Asia/Taipei")
+  info$sunset <- lubridate::force_tz(info$sunset, tzone = "Asia/Taipei")
+  info$start_date_time <- lubridate::force_tz(info$start_date_time, tzone = "Asia/Taipei")
+  info$end_date_time <- lubridate::force_tz(info$end_date_time, tzone = "Asia/Taipei")
 
   # Ensure no_hobo is treated as a character type
-  info <- info %>%
-    mutate(no_hobo = as.character(no_hobo))
+  info <- dplyr::mutate(info, no_hobo = as.character(no_hobo))
 
   # Return the processed dataframe
   return(info)
@@ -276,7 +254,7 @@ plot_hobo <- function(df) {
 }
 
 #' @title calculate_do
-#' @import dplyr
+#' @importFrom dplyr mutate filter summarise select
 #' @description Calculate the Net Ecosystem Production,
 #' Gross Primary Production and Ecosystem respiration based on the change in dissolved oxygen concentration.
 #' @param df Merged dataframe produced by process_hobo(), process_weather() and process_info() functions.
@@ -289,7 +267,7 @@ plot_hobo <- function(df) {
 calculate_do <- function(df) {
 
   # Calculate various metrics related to dissolved oxygen and ecosystem productivity
-  df <- df %>%
+  df <- df |>
     dplyr::mutate(
       # Calculate daylight hours as the difference between sunset and sunrise
       daylight_hr = as.numeric(sunset - sunrise),
@@ -337,31 +315,30 @@ calculate_do <- function(df) {
     )
 
   # Calculate average NEP for nighttime (outside of daylight hours)
-  tidy_do_r <- df %>%
-    dplyr::filter(time < sunrise_time | time >= sunset_time) %>%
-    dplyr::group_by(site, no_hobo, date) %>%
-    dplyr::summarise(r_hr = mean(nep_hr, na.rm = TRUE)) %>%
-    dplyr::ungroup()
+  tidy_do_r <- df |>
+    dplyr::filter(time < sunrise_time | time >= sunset_time) |>
+    dplyr::summarise(r_hr = mean(nep_hr, na.rm = TRUE), .by = c(site, no_hobo, date))
 
   # Calculate average NEP for daytime (within daylight hours)
-  tidy_do_nep <- df %>%
-    dplyr::filter(time >= sunrise_time, time < sunset_time) %>%
-    dplyr::group_by(site, no_hobo, date) %>%
-    dplyr::summarise(nep_hr = mean(nep_hr, na.rm = TRUE),
-                     daylight_hr = mean(daylight_hr, na.rm = TRUE)) %>%
-    dplyr::mutate(nep_daytime = nep_hr * daylight_hr) %>%
-    dplyr::ungroup()
+  tidy_do_nep <- df |>
+    dplyr::filter(time >= sunrise_time, time < sunset_time) |>
+    dplyr::summarise(
+      nep_hr = mean(nep_hr, na.rm = TRUE),
+      daylight_hr = mean(daylight_hr, na.rm = TRUE),
+      .by = c(site, no_hobo, date)
+    ) |>
+    dplyr::mutate(nep_daytime = nep_hr * daylight_hr)
 
   # Merge nighttime and daytime NEP results
   tidy_do <- merge(tidy_do_r, tidy_do_nep, by = c("site", "no_hobo", "date"))
 
   # Calculate total respiration and gross primary production (GPP)
-  tidy_do <- tidy_do %>%
+  tidy_do <- tidy_do |>
     dplyr::mutate(r_daytime = r_hr * daylight_hr,
                   r_day = r_hr * 24,  # Total respiration over 24 hours
                   gpp = nep_daytime - r_daytime,  # Gross primary production
                   nep = gpp + r_day  # Net ecosystem production
-    ) %>%
+    ) |>
     dplyr::select(site, no_hobo, date, r_day, gpp, nep)  # Select relevant columns for output
 
   # Return the tidy dataframe with calculated metrics
@@ -411,6 +388,7 @@ combine_weather <- function(file_path, start_date, end_date, zone) {
 #' @title combine_hobo
 #' @importFrom stringr str_replace
 #' @importFrom stringr str_remove
+#' @importFrom purrr map_dfr
 #' @description Tidy multiple data retrieved from HOBO U26 Dissolved Oxygen Data Logger.
 #' @param file_path Directory of the folder containing the files.
 #' @param file_prefix The prefix before the code for the data logger, defaults to "no."
@@ -425,11 +403,8 @@ combine_hobo <- function(file_path, file_prefix = "no.") {
   # List all files in the specified directory that match the given prefix
   file_names <- list.files(file_path, pattern = paste0("^", file_prefix))
 
-  # Initialize an empty data frame to store combined results
-  df <- data.frame()
-
-  # Loop through each file name to process the corresponding data
-  for (file_name in file_names) {
+  # Use map_dfr to process all files and combine results (avoids O(n^2) rbind)
+  df <- purrr::map_dfr(file_names, function(file_name) {
     # Extract the hobo number from the file name
     no_hobo <- stringr::str_replace(file_name, paste0("^", file_prefix), "")
     no_hobo <- stringr::str_remove(no_hobo, ".csv")
@@ -438,11 +413,8 @@ combine_hobo <- function(file_path, file_prefix = "no.") {
     file <- file.path(file_path, file_name)
 
     # Process the hobo data using the process_hobo function
-    do <- process_hobo(file_path = file, no_hobo = no_hobo)
-
-    # Combine the processed data into the main data frame
-    df <- rbind(df, do)
-  }
+    process_hobo(file_path = file, no_hobo = no_hobo)
+  })
 
   # Return the combined data frame containing all processed hobo data
   return(df)

@@ -17,7 +17,7 @@ test_that("process_weather works correctly", {
   expect_identical(column_names, names(data))
   expect_true(is.numeric(data$pressure_hpa))
   expect_true(is.numeric(data$wind_ms))
-  expect_true(is.POSIXct(data$date_time))
+  expect_true(inherits(data$date_time, "POSIXct"))
   expect_identical("zone_A", data$zone[1])
 })
 

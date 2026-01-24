@@ -1,7 +1,7 @@
 Package: aelab
 Type: Package
 Title: Data Processing for Aquatic Ecology
-Version: 1.0.0
+Version: 1.0.1
 Authors@R: person("Zhao-Jun", "Yong", role = c("cre","aut"), email = "nuannuan0425@gmail.com")
 Maintainer: Zhao-Jun Yong <nuannuan0425@gmail.com>
 Description: Facilitate the analysis of data related to aquatic ecology, specifically the establishment of carbon budget. 
@@ -10,7 +10,7 @@ Description: Facilitate the analysis of data related to aquatic ecology, specifi
   (ii) the calculation of Dissolved Oxygen (DO) metabolism based on data obtained from dissolved oxygen data logger using the method described in Staehr et al. (2010). 
   Yong et al. (2024) <doi:10.5194/bg-21-5247-2024>.
   Staehr et al. (2010) <doi:10.4319/lom.2010.8.0628>.
-Imports: tibble, lubridate, stats, dplyr, openxlsx, readxl, ggplot2, readr, tidyr, stringr
+Imports: tibble, lubridate, stats, dplyr, openxlsx, readxl, ggplot2, readr, tidyr, stringr, purrr
 License: GPL (>= 3)
 Encoding: UTF-8
 RoxygenNote: 7.2.3
