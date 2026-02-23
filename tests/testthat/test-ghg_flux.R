@@ -30,9 +30,9 @@ test_that("calculate_regression returns correct results", {
 
 test_that("convert_ghg_unit converts correctly", {
   result <- convert_ghg_unit(1, "co2", mass = "mmol")
-  expect_equal(result, 1000, tolerance = 0.01)  # Example expected value
+  expect_equal(as.numeric(result$value), 44010, tolerance = 1)  # 1 mmol co2 = 44.01g/mol * 1000 µg/mg * 1000 = 44010 µg
 })
 
 test_that("convert_ghg_unit throws error for invalid GHG", {
-  expect_error(convert_ghg_unit(1, "invalid_gas"), "Invalid GHG type. Please use 'co2', 'ch4', or 'n2o'.")
+  expect_error(convert_ghg_unit(1, "invalid_gas"), "Invalid GHG type")
 })

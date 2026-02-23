@@ -4,25 +4,52 @@
 \alias{convert_ghg_unit}
 \title{convert_ghg_unit}
 \usage{
-convert_ghg_unit(ghg_value, ghg, mass = "µmol", area = "m2", time = "h")
+convert_ghg_unit(
+  input,
+  ghg,
+  mass = "µg",
+  area = "m2",
+  time = "hr",
+  digits = 2,
+  ratio = FALSE
+)
 }
 \arguments{
-\item{ghg_value}{The value of the flux.}
+\item{input}{A single numeric value or a character string containing one or
+more numbers.}
 
-\item{ghg}{The molecular formula of greenhouse gases (co2: carbon dioxide; ch4: methane; n2o: nitrous oxide).}
+\item{ghg}{The molecular formula of the greenhouse gas: \code{"co2"},
+\code{"ch4"}, or \code{"n2o"}.}
 
-\item{mass}{The mass component of the input GHG flux, default to micromoles.}
+\item{mass}{Mass unit of the input flux. One of \code{"mmol"}, \code{"mg"},
+\code{"g"}, \code{"ug"} (micrograms), \code{"nmol"}, \code{"Mg"},
+\code{"umol"} (micromoles), \code{"mol"}. Default \code{"ug"}.}
 
-\item{area}{The area component of the input GHG flux, default to square meter.}
+\item{area}{Area unit of the input flux. One of \code{"ha"}, \code{"m2"}.
+Default \code{"m2"}.}
 
-\item{time}{The time component of the input GHG flux, default to hour.}
+\item{time}{Time unit of the input flux. One of \code{"yr"}, \code{"day"},
+\code{"hr"}, \code{"sec"}, \code{"min"}. Default \code{"hr"}.}
+
+\item{digits}{Number of decimal places to round to. Default 2.}
+
+\item{ratio}{Logical. If \code{TRUE}, apply an elemental-ratio correction
+(C-basis for CH4, N-basis for N2O). Default \code{FALSE}.}
 }
 \value{
-A numeric value.
+A named list with \code{value} (converted string) and \code{unit},
+  or \code{"EMPTY"} for missing/non-numeric input.
 }
 \description{
-Convert the greenhouse gas (GHG) flux to micromoles per square meter per hour.
+Convert a greenhouse gas (GHG) flux value (or a character string
+  containing one or more numeric values, e.g. \code{"0.002 +/- 0.003"})
+  to micrograms per square meter per hour.
+}
+\details{
+Numeric values embedded in a string (e.g. mean +/- SD notation)
+  are each converted individually and the surrounding text is preserved.
+  Commas are treated as decimal separators.
 }
 \examples{
-convert_ghg_unit(1, ghg = "co2")
+convert_ghg_unit(97, ghg = "ch4", mass = "mg", area = "m2", time = "hr")
 }

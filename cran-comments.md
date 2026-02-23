@@ -1,25 +1,43 @@
-## Resubmission
+## Resubmission — v1.1.0
 
-* Omit the redundant "R pakcage" from the title.
+This submission adds 19 new exported functions across five new/modified source files
+covering statistics, visualisation, GHG calculations, lab analysis, and weather-data
+processing. The existing `convert_ghg_unit()` function has been updated to accept
+character-string inputs (e.g. "mean ± SD" notation) and now returns a named list.
 
-## Resubmission
+### Changes since v1.0.1
 
-This is a resubmission. In this version I have fixed following issues:
+* Added `R/statistics.R`: 7 statistical helpers
+  (`descriptive_statistic`, `normality_test_t`, `normality_test_aov`,
+  `aov_test`, `ks_test`, `df_trans`, `find_outlier`).
+* Added `R/visualization.R`: 4 plot wrappers, a palette system (5 functions),
+  and `plot_map_taiwan`.
+* Added `R/lab_analysis.R`: `calc_chla_trichromatic`.
+* Updated `R/ghg_flux.R`: replaced `convert_ghg_unit`, added `calculate_MDF`
+  and `calculate_total_co2e`.
+* Updated `R/hobo_do.R`: added `process_weather_month` and
+  `combine_weather_month`.
+* New `Imports`: `rlang`, `grDevices`, `multcompView`, `FSA`, `rcompanion`,
+  `rnaturalearth`, `sf`, `ggspatial`.
+* `rnaturalearthdata` moved to `Suggests` (used internally by `rnaturalearth`
+  but not called directly).
 
-* Start the description with "Facilitates the ..." instead of ""This package...".
+### Notes on `\dontrun` in examples
 
-* Omit the redundant "R" from "R functions".
+Plot function examples (`plot_point`, `plot_line`, `plot_box`, `plot_bar`,
+and related scale/palette functions) are wrapped in `\dontrun{}` because they
+set `family = "Century Gothic"` in the ggplot2 theme. This system font is not
+available in the PostScript font database on check servers, which causes a hard
+error (not merely a warning) during example rendering. The examples are
+syntactically correct and functional on systems where the font is installed.
 
-* Remove unecassary linebreaks.
+### R CMD check results
 
-* Remove brand names such as LI-COR and HOBO.
+0 errors | 0 warnings | 2 notes
 
-* Unwrap examples if executable. Replace \dontrun with \donttest with examples that are not.
-
-* Add raw data files to inst/extdata subfolder
-
-## R CMD check results
-
-0 errors | 0 warnings | 1 note
-
-* This is a new release.
+* NOTE: "unable to verify current time" — network access restricted in check
+  environment; not a package issue.
+* NOTE: "Non-standard file/directory found at top level: 'CLAUDE.md'" — this
+  is a project-level AI assistant configuration file used during development;
+  it does not affect package functionality. We will remove it from the repo
+  root prior to the next submission if CRAN requests it.

@@ -420,3 +420,91 @@ combine_hobo <- function(file_path, file_prefix = "no.") {
   return(df)
 }
 
+
+#' @title process_weather_month
+#' @description Import and tidy a monthly weather CSV file downloaded from a
+#'   Taiwan Central Weather Administration station. Column selection is done via
+#'   regex so minor header changes are handled gracefully.
+#' @param file_path Path to the monthly CSV file.
+#' @param month Month number (1–12) covered by the file.
+#' @param year Four-digit year. Default 2024.
+#' @param zone Character label for the weather station / region.
+#' @return A data frame with columns \code{day}, \code{pressure_hpa},
+#'   \code{temp}, \code{humidity_percent}, \code{wind_ms}, \code{rain_mm},
+#'   \code{daylight_hr}, \code{radiation}, \code{date}, and \code{zone}.
+#' @examples
+#' \dontrun{
+#' df <- process_weather_month("path/to/2024-01.csv", month = 1, year = 2024,
+#'                             zone = "site_A")
+#' }
+#' @importFrom readr read_csv
+#' @importFrom dplyr mutate across where
+#' @export
+process_weather_month <- function(file_path, month, year = 2024, zone) {
+  df <- readr::read_csv(file_path, show_col_types = FALSE)
+
+  regex_patterns <- c(
+    day              = "^\u89c0\u6e2c\u6642\u9593",   # 觀測時間
+    pressure_hpa     = "^\u6e2c\u7ad9\u6c23\u58d3",  # 測站氣壓
+    temp             = "^\u6c23\u6eab",               # 氣溫
+    humidity_percent = "^\u76f8\u5c0d\u6fd5\u5ea6",  # 相對溼度
+    wind_ms          = "^\u98a8\u901f",               # 風速
+    rain_mm          = "^\u964d\u6c34\u91cf",         # 降水量
+    daylight_hr      = "^\u65e5\u7167\u6642\u6578",   # 日照時數
+    radiation        = "^\u5168\u5929\u7a7a\u65e5\u5c04\u91cf" # 全天空日射量
+  )
+
+  selected_cols <- sapply(regex_patterns, function(pattern) {
+    match_cols <- grep(pattern, colnames(df), ignore.case = TRUE)
+    if (length(match_cols) > 0) match_cols[1] else NULL
+  })
+  selected_cols <- unlist(selected_cols)
+
+  df <- df[-1, selected_cols]
+  colnames(df) <- names(selected_cols)
+
+  df <- dplyr::mutate(df, dplyr::across(dplyr::where(is.character), as.numeric))
+  df <- df[order(df$day), ]
+
+  day_sequence <- seq(
+    from       = as.Date(paste(year, month, 1, sep = "-"), format = "%Y-%m-%d"),
+    by         = "1 day",
+    length.out = nrow(df)
+  )
+  df$date <- as.Date(as.POSIXct(day_sequence, tz = "Asia/Taipei"))
+  df$zone <- zone
+
+  return(df)
+}
+
+
+#' @title combine_weather_month
+#' @description Batch-import monthly weather CSV files from a Taiwan Central
+#'   Weather Administration station for a consecutive range of months.
+#' @details File names are expected to follow the pattern
+#'   \code{<file_path><year>-0<month>.csv} (e.g. \code{2024-01.csv}).
+#' @param file_path Path prefix (directory + filename prefix before the date
+#'   portion, e.g. \code{"data/weather/"}).
+#' @param start_month First month to import (1–9; two-digit months not yet
+#'   supported).
+#' @param end_month Last month to import.
+#' @param year Four-digit year. Default 2024.
+#' @param zone Character label for the weather station / region.
+#' @return A combined data frame produced by \code{\link{process_weather_month}}.
+#' @examples
+#' \dontrun{
+#' df <- combine_weather_month("data/weather/", start_month = 1,
+#'                             end_month = 6, year = 2024, zone = "site_A")
+#' }
+#' @importFrom dplyr bind_rows
+#' @importFrom purrr map_dfr
+#' @export
+combine_weather_month <- function(file_path, start_month, end_month,
+                                  year = 2024, zone) {
+  months <- as.character(seq(as.numeric(start_month), as.numeric(end_month)))
+
+  purrr::map_dfr(months, function(month) {
+    file_name <- paste0(file_path, year, "-0", month, ".csv")
+    process_weather_month(file_name, month, year = year, zone = zone)
+  })
+}

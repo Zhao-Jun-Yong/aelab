@@ -241,52 +241,173 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 }
 
 #' @title convert_ghg_unit
-#' @description Convert the greenhouse gas (GHG) flux to micromoles per square meter per hour.
-#' @param ghg_value The value of the flux.
-#' @param ghg The molecular formula of greenhouse gases (co2: carbon dioxide; ch4: methane; n2o: nitrous oxide).
-#' @param mass The mass component of the input GHG flux, default to micromoles.
-#' @param area The area component of the input GHG flux, default to square meter.
-#' @param time The time component of the input GHG flux, default to hour.
-#' @return A numeric value.
+#' @description Convert a greenhouse gas (GHG) flux value (or a character string
+#'   containing one or more numeric values, e.g. \code{"0.002 +/- 0.003"})
+#'   to micrograms per square meter per hour.
+#' @details Numeric values embedded in a string (e.g. mean +/- SD notation)
+#'   are each converted individually and the surrounding text is preserved.
+#'   Commas are treated as decimal separators.
+#' @param input A single numeric value or a character string containing one or
+#'   more numbers.
+#' @param ghg The molecular formula of the greenhouse gas: \code{"co2"},
+#'   \code{"ch4"}, or \code{"n2o"}.
+#' @param mass Mass unit of the input flux. One of \code{"mmol"}, \code{"mg"},
+#'   \code{"g"}, \code{"ug"} (micrograms), \code{"nmol"}, \code{"Mg"},
+#'   \code{"umol"} (micromoles), \code{"mol"}. Default \code{"ug"}.
+#' @param area Area unit of the input flux. One of \code{"ha"}, \code{"m2"}.
+#'   Default \code{"m2"}.
+#' @param time Time unit of the input flux. One of \code{"yr"}, \code{"day"},
+#'   \code{"hr"}, \code{"sec"}, \code{"min"}. Default \code{"hr"}.
+#' @param digits Number of decimal places to round to. Default 2.
+#' @param ratio Logical. If \code{TRUE}, apply an elemental-ratio correction
+#'   (C-basis for CH4, N-basis for N2O). Default \code{FALSE}.
+#' @return A named list with \code{value} (converted string) and \code{unit},
+#'   or \code{"EMPTY"} for missing/non-numeric input.
 #' @examples
-#' convert_ghg_unit(1, ghg = "co2")
+#' convert_ghg_unit(97, ghg = "ch4", mass = "mg", area = "m2", time = "hr")
 #' @export
+convert_ghg_unit <- function(input, ghg, mass = "\u00b5g", area = "m2",
+                             time = "hr", digits = 2, ratio = FALSE) {
+  if (is.na(input) || input == "") return("EMPTY")
 
-convert_ghg_unit <- function(ghg_value, ghg, mass = "\u00B5mol", area = "m2", time = "h") {
+  input <- gsub(",", ".", as.character(input))
 
-  # Define molar masses for GHGs in g/mol
-  molar_mass <- c(co2 = 44.01, ch4 = 16.04, n2o = 44.01)
+  numeric_values <- unlist(regmatches(input,
+    gregexpr("[-+]?[0-9]*\\.?[0-9]+", input)))
 
-  # Check if the specified GHG is valid
-  if (!ghg %in% names(molar_mass)) {
-    stop("Invalid GHG type. Please use 'co2', 'ch4', or 'n2o'.")
+  if (length(numeric_values) == 0) return("EMPTY")
+
+  valid_ghgs <- c("co2", "ch4", "n2o")
+  molar_mass <- switch(ghg,
+    "co2" = 44.01, "ch4" = 16.04, "n2o" = 44.01,
+    stop(paste("Invalid GHG type. Please use one of:",
+               paste(valid_ghgs, collapse = ", "))))
+
+  valid_masses <- c("mmol", "mg", "g", "\u00b5g", "nmol", "Mg", "\u00b5mol", "mol")
+  if (!(mass %in% valid_masses))
+    stop(paste("Invalid mass unit. Please use one of:",
+               paste(valid_masses, collapse = ", ")))
+
+  valid_areas <- c("ha", "m2")
+  if (!(area %in% valid_areas))
+    stop(paste("Invalid area unit. Please use one of:",
+               paste(valid_areas, collapse = ", ")))
+
+  valid_times <- c("yr", "day", "hr", "sec", "min")
+  if (!(time %in% valid_times))
+    stop(paste("Invalid time unit. Please use one of:",
+               paste(valid_times, collapse = ", ")))
+
+  convert_value <- function(value) {
+    # Convert mass to µg
+    value <- switch(mass,
+      "mmol"      = value * molar_mass * 1000,
+      "mg"        = value * 1000,
+      "g"         = value * 1000000,
+      "\u00b5g"   = value,
+      "nmol"      = (value * molar_mass) / 1000,
+      "Mg"        = value * 1e+12,
+      "\u00b5mol" = value * molar_mass,
+      "mol"       = value * molar_mass * 1000000
+    )
+    # Convert area to m2
+    if (area == "ha") value <- value / 10000
+    # Convert time to hours
+    value <- switch(time,
+      "yr"  = value / 8760,
+      "day" = value / 24,
+      "sec" = value * 3600,
+      "min" = value * 60,
+      "hr"  = value
+    )
+    # Optional elemental-ratio correction
+    if (ratio) {
+      if (ghg == "ch4") value <- value * (16.04 / 12.01)
+      if (ghg == "n2o") value <- value * (44.013 / 14.0067)
+    }
+    round(value, digits)
   }
 
-  # Get the molar mass for the specified GHG
-  mm <- molar_mass[[ghg]]
+  for (num in numeric_values) {
+    converted_num <- convert_value(as.numeric(num))
+    input <- gsub(paste0("\\b", num, "\\b"), as.character(converted_num), input)
+  }
 
-  # Convert mass to micromoles
-  mass_conversion <- switch(mass,
-                            "mmol" = ghg_value * 1000,
-                            "mg" = (ghg_value / mm) * 1000,
-                            "g" = (ghg_value / mm) * 1000000,
-                            "\u00B5g" = (ghg_value / mm),
-                            "\u00B5mol" = ghg_value,
-                            stop("Unsupported mass unit."))
-
-  # Convert area to per square meter
-  area_conversion <- switch(area,
-                            "ha" = mass_conversion / 10000,
-                            "m2" = mass_conversion,
-                            stop("Unsupported area unit."))
-
-  # Convert time to per hour
-  time_conversion <- switch(time,
-                            "yr" = area_conversion / 8760,
-                            "d" = area_conversion / 24,
-                            "h" = area_conversion,
-                            stop("Unsupported time unit."))
-
-  return(time_conversion)
+  list(value = input, unit = "\u00b5g m\u207b\u00b2 h\u207b\u00b9")
 }
 
+
+#' @title calculate_MDF
+#' @description Calculate the Minimum Detectable Flux (MDF) for a static chamber
+#'   GHG measurement system.
+#' @param precision_ppm Precision of the gas analyser (ppm).
+#' @param closure_time_s Closure time of the measurement (seconds).
+#' @param data_point_n Number of data points recorded during the closure period.
+#' @param chamber_volume_m3 Internal volume of the chamber (m\eqn{^3}).
+#' @param temperature_C Air temperature at the measurement location (\eqn{^\circ}C).
+#' @param chamber_area_m2 Base area of the chamber (m\eqn{^2}).
+#' @param pressure_pa Atmospheric pressure (Pa). Default 101325.
+#' @param ideal_constant Ideal gas constant (J mol\eqn{^{-1}} K\eqn{^{-1}}).
+#'   Default 8.314.
+#' @param ghg Greenhouse gas type: \code{"co2"}, \code{"ch4"}, or \code{"n2o"}.
+#'   Default \code{"co2"}.
+#' @return A named list with \code{MDF} (numeric,
+#'   \eqn{\mu}g m\eqn{^{-2}} h\eqn{^{-1}}) and \code{unit} (string).
+#' @examples
+#' calculate_MDF(
+#'   precision_ppm     = 1,
+#'   closure_time_s    = 300,
+#'   data_point_n      = 300,
+#'   chamber_volume_m3 = 0.0064,
+#'   temperature_C     = 25,
+#'   chamber_area_m2   = 0.07
+#' )
+#' @export
+calculate_MDF <- function(precision_ppm, closure_time_s, data_point_n,
+                          chamber_volume_m3, temperature_C, chamber_area_m2,
+                          pressure_pa = 101325, ideal_constant = 8.314,
+                          ghg = "co2") {
+  if (any(c(precision_ppm, closure_time_s, data_point_n,
+            chamber_volume_m3, temperature_C, chamber_area_m2) <= 0)) {
+    stop("All parameters must be positive and non-zero.")
+  }
+
+  molar_masses <- list(co2 = 44.01, ch4 = 16.04, n2o = 44.01)
+  if (!(ghg %in% names(molar_masses)))
+    stop("Invalid GHG type. Choose from 'co2', 'ch4', or 'n2o'.")
+
+  part1    <- precision_ppm / (closure_time_s * sqrt(data_point_n))
+  part2    <- (chamber_volume_m3 * pressure_pa) /
+                (ideal_constant * (temperature_C + 273.15) * chamber_area_m2)
+  MDF_umol <- part1 * part2 * 3600
+  MDF      <- MDF_umol * molar_masses[[ghg]]
+
+  list(MDF = MDF, unit = "\u00b5g m\u207b\u00b2 h\u207b\u00b9")
+}
+
+
+#' @title calculate_total_co2e
+#' @description Convert individual GHG fluxes (mg m\eqn{^{-2}} h\eqn{^{-1}})
+#'   to a total CO\eqn{_2}-equivalent flux (g m\eqn{^{-2}} d\eqn{^{-1}}) using
+#'   IPCC AR6 100-year GWPs (CO\eqn{_2} = 1, CH\eqn{_4} = 27,
+#'   N\eqn{_2}O = 273).
+#' @param co2 CO\eqn{_2} flux in mg m\eqn{^{-2}} h\eqn{^{-1}}. Default 0.
+#' @param ch4 CH\eqn{_4} flux in mg m\eqn{^{-2}} h\eqn{^{-1}}. Default 0.
+#' @param n2o N\eqn{_2}O flux in mg m\eqn{^{-2}} h\eqn{^{-1}}. Default 0.
+#' @return Total CO\eqn{_2}e flux as a numeric scalar
+#'   (g m\eqn{^{-2}} d\eqn{^{-1}}), printed with a diagnostic message.
+#' @examples
+#' calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003)
+#' @export
+calculate_total_co2e <- function(co2 = 0, ch4 = 0, n2o = 0) {
+  co2e_mg_hr <- co2 + (ch4 * 27) + (n2o * 273)
+  co2e_g_day <- co2e_mg_hr * 0.001 * 24
+
+  message("Calculating total CO2e emissions:")
+  message(sprintf("CO2 emissions: %.2f mg m^-2 h^-1", co2))
+  message(sprintf("CH4 emissions: %.2f mg m^-2 h^-1 (GWP: 27)", ch4))
+  message(sprintf("N2O emissions: %.2f mg m^-2 h^-1 (GWP: 273)", n2o))
+  message(sprintf("Total CO2e emissions: %.2f g m^-2 d^-1", co2e_g_day))
+
+  return(co2e_g_day)
+}
