@@ -106,6 +106,43 @@ flux_ch4 <- data.frame(
 calculate_ghg_flux(flux_ch4)
 ```
 
+## Additional GHG tools
+
+### `convert_ghg_unit()`
+
+`convert_ghg_unit()` converts a GHG flux value to µg m⁻² h⁻¹. The input can be a plain number or a character string containing embedded numbers (e.g., a mean ± SD string); each number in the string is converted individually.
+
+```{r}
+# Numeric input: 97 mg CH4 m-2 h-1 → µg m-2 h-1
+convert_ghg_unit(97, ghg = "ch4", mass = "mg", area = "m2", time = "hr")
+
+# Character string input: each number is converted individually
+convert_ghg_unit("0.002 ± 0.003", ghg = "ch4", mass = "mmol", area = "m2", time = "hr")
+```
+
+### `calculate_MDF()`
+
+`calculate_MDF()` calculates the Minimum Detectable Flux (MDF) for a static chamber system. This is useful for evaluating whether a gas analyser is precise enough to detect fluxes at the expected magnitude of the study site.
+
+```{r}
+calculate_MDF(
+  precision_ppm     = 1,
+  closure_time_s    = 300,
+  data_point_n      = 300,
+  chamber_volume_m3 = 0.0064,
+  temperature_C     = 25,
+  chamber_area_m2   = 0.07
+)
+```
+
+### `calculate_total_co2e()`
+
+`calculate_total_co2e()` aggregates individual GHG fluxes (mg m⁻² h⁻¹) into a single total CO₂-equivalent flux (g m⁻² d⁻¹) using IPCC AR6 100-year GWPs (CH₄ = 27, N₂O = 273).
+
+```{r}
+calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003)
+```
+
 # NEM calculation
 
 The change in oxygen concentration in the water reflects the balance between photosynthetic production, respiratory consumption, and physical exchange at the water-atmosphere interface. By measuring dissolved oxygen (DO) concentrations at high frequency with in situ data loggers, we can calculate gross primary production (GPP), ecosystem respiration (ER), and net ecosystem metabolism (NEM), as detailed by Staehr et al. (2010).
@@ -152,6 +189,93 @@ GPP and ER can be calculated using `calculate_do()`. NEM (denoted as `nep` in th
 
 ```{r}
 calculate_do(merged_df)
+```
+
+# Statistical analysis
+
+aelab provides a small suite of statistical helpers that cover a typical aquatic ecology workflow: describe your data, check for outliers, test normality, transform if needed, and choose between a parametric or non-parametric group comparison.
+
+The examples below use a simple self-contained data frame with three groups.
+
+```{r}
+set.seed(42)
+stat_df <- data.frame(
+  group = rep(c("A", "B", "C"), each = 8),
+  value = c(rnorm(8, 2, 0.4), rnorm(8, 3.5, 0.5), rnorm(8, 5, 0.6))
+)
+```
+
+## Descriptive statistics — `descriptive_statistic()`
+
+`descriptive_statistic()` returns mean ± SD and min–max for each group.
+
+```{r}
+descriptive_statistic(stat_df, vars = value, groups = group)
+```
+
+## Outlier detection — `find_outlier()`
+
+`find_outlier()` uses the IQR method (values outside 1.5 × IQR from Q1/Q3) to flag outliers.
+
+```{r}
+find_outlier(stat_df, var = "value")
+```
+
+## Normality testing
+
+Use `normality_test_t()` when comparing two groups (t-test context), and `normality_test_aov()` when comparing three or more groups (ANOVA context). Both apply Shapiro-Wilk to raw, square-root, and log10 transforms so you can identify whether a transformation improves normality.
+
+```{r}
+# Two-group context
+normality_test_t(stat_df, "value", group, "A", "B")
+
+# One-way ANOVA context (all three groups)
+normality_test_aov(stat_df, "value", "group")
+```
+
+## Data transformation — `df_trans()`
+
+If residuals are not normal, `df_trans()` appends a transformed column to the data frame for re-testing.
+
+```{r}
+stat_df_t <- df_trans(stat_df, "value", "sqrt")
+head(stat_df_t)
+```
+
+## Parametric test — `aov_test()`
+
+When normality holds, `aov_test()` runs a one-way ANOVA followed by Tukey HSD post-hoc comparisons and returns compact letter display (CLD) groupings.
+
+```{r}
+aov_test(stat_df, "value", "group")
+```
+
+## Non-parametric test — `ks_test()`
+
+When normality cannot be assumed, `ks_test()` runs Kruskal-Wallis followed by Dunn's post-hoc test with Bonferroni correction.
+
+```{r}
+ks_test(stat_df, "value", "group")
+```
+
+# Visualization
+
+aelab provides plot wrappers — `plot_point()`, `plot_line()`, `plot_box()`, and `plot_bar()` — with a consistent theme built on Century Gothic. Custom colour palettes are available through `aelab_palettes()`, `scale_fill_aelab_d()`, and related scale functions.
+
+The example below previews the `"ghg"` palette and applies it to a box plot comparing CH₄ fluxes across three habitat types.
+
+```{r eval=FALSE}
+# Preview the "ghg" palette
+aelab_palettes("ghg")
+
+# Box plot with aelab palette
+df_vis <- data.frame(
+  site = rep(c("Mangrove", "Mudflat", "Seagrass"), each = 10),
+  ch4  = c(rnorm(10, 2, 0.5), rnorm(10, 1, 0.3), rnorm(10, 0.5, 0.2))
+)
+
+plot_box(df_vis, site, ch4, site) +
+  scale_fill_aelab_d("ghg")
 ```
 
 # Reference
