@@ -109,21 +109,38 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' @importFrom stats lm
 #' @importFrom stats coef
 #' @importFrom purrr map_dfr
+#' @importFrom stringr str_detect
 #' @title calculate_regression
 #' @description Calculate the slope of greenhouse gas (GHG) concentration change over time using simple linear regression.
-#' @param data Data from the LI-COR Trace Gas Analyzer that has been processed and time-converted.
-#' @param ghg Column name of the file containing data on GHG concentration (e.g., "CH4", "N2O").
-#' @param reference_time The date and time at which the measurement started.
-#' @param duration_minutes The duration  of the measurement, default to 7.
+#' @param data Data from the GHG analyzer that has been processed and time-converted.
+#' @param reference_df A data frame containing measurement reference times, site names, and an \code{analyzer} column.
+#' @param ghg Column name in \code{data} containing GHG concentration values (e.g., \code{"CH4"}, \code{"N2O"}).
+#' @param reference_time Column name in \code{reference_df} containing the measurement start times (POSIXct).
+#' @param site Column name in \code{reference_df} containing site identifiers.
+#' @param analyzer_code String pattern used to filter results by the \code{analyzer} column of \code{reference_df}.
+#' @param duration_minutes The duration of the measurement, default to 7.
 #' @param num_rows The number of rows used to perform the regression, default to 300.
-#' @return A tibble containing the time range (POSIXct format) of the slope and R2 (both numeric) from the simple linear regression.
+#' @return A tibble containing the time range, slope, R2, site, and analyzer from the simple linear regression.
 #' @examples
 #' data(n2o)
-#' calculate_regression(n2o, "N2O", as.POSIXct("2023-05-04 09:16:15", tz = "UTC"))
+#' n2o_converted <- convert_time(n2o)
+#' ref <- data.frame(
+#'   date_time = as.POSIXct("2023-05-04 09:16:15", tz = "Asia/Taipei"),
+#'   site = "S1",
+#'   analyzer = "1074"
+#' )
+#' calculate_regression(n2o_converted, ref, "N2O",
+#'                      reference_time = "date_time", site = "site",
+#'                      analyzer_code = "1074")
 #' @export
 
-calculate_regression <- function(data, ghg, reference_time,
+calculate_regression <- function(data, reference_df, ghg,
+                                 reference_time, site, analyzer_code,
                                  duration_minutes = 7, num_rows = 300) {
+
+  reference_time_vec <- lubridate::force_tz(reference_df[[reference_time]], tzone = "Asia/Taipei")
+  reference_site     <- reference_df[[site]]
+  reference_analyzer <- reference_df$analyzer
 
   # Check if 'real_datetime' exists; if not, use 'date_time' as a fallback
   if (!"real_datetime" %in% colnames(data) && "date_time" %in% colnames(data)) {
@@ -133,12 +150,9 @@ calculate_regression <- function(data, ghg, reference_time,
     data$real_datetime <- lubridate::force_tz(data$real_datetime, tzone = "Asia/Taipei")
   }
 
-  # Ensure the reference time is in the correct timezone
-  reference_time <- lubridate::force_tz(reference_time, tzone = "Asia/Taipei")
-
   # Use map_dfr to iterate through each reference time (avoids O(n^2) rbind)
-  results <- purrr::map_dfr(seq_along(reference_time), function(i) {
-    reference_datetime <- reference_time[i]
+  results <- purrr::map_dfr(seq_along(reference_time_vec), function(i) {
+    reference_datetime <- reference_time_vec[i]
 
     # Define the start and end time for the regression window
     start_time <- reference_datetime
@@ -155,6 +169,8 @@ calculate_regression <- function(data, ghg, reference_time,
     best_slope <- NA
     best_start_time <- NA
     best_end_time <- NA
+    cor_site <- NA
+    cor_analyzer <- NA
 
     # Loop through the sorted data to find the best regression fit
     for (j in 1:(nrow(sorted_data) - num_rows + 1)) {
@@ -173,6 +189,8 @@ calculate_regression <- function(data, ghg, reference_time,
         best_slope <- stats::coef(regression)[2]  # Get the slope from the regression coefficients
         best_start_time <- selected_data$real_datetime[1]  # Record the start time of the best fit
         best_end_time <- selected_data$real_datetime[length(selected_data$real_datetime)]  # Record the end time of the best fit
+        cor_site     <- reference_site[i]
+        cor_analyzer <- reference_analyzer[i]
       }
     }
 
@@ -182,9 +200,14 @@ calculate_regression <- function(data, ghg, reference_time,
       end_time = format(best_end_time, "%Y/%m/%d %H:%M:%S"),
       slope = best_slope,
       r_square = best_r_square,
-      reference_time = reference_time[i]
+      reference_time = reference_time_vec[i],
+      site = cor_site,
+      analyzer = cor_analyzer
     )
   })
+
+  # Filter results to the requested analyzer
+  results <- results[stringr::str_detect(results$analyzer, analyzer_code), ]
 
   # Return the results tibble containing regression analysis results
   return(results)

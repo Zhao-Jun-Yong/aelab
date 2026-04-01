@@ -65,23 +65,30 @@ ref <- read_excel(ref_data_path)
 ref
 ```
 
-Now, we can perform multiple simple linear regressions on the GHG concentrations, separated by the `date_time` value in the `ref` data, using `calculate_regression()`. The measurement duration, referred to as `duration_minutes`, is set to a default of 7 minutes, and the number of rows used for the regression, also denoted as `duration_minutes`, defaults to 300 rows (which is equivalent to 5 minutes). These values can be modified if desired. 
+Now, we can perform multiple simple linear regressions on the GHG concentrations, separated by the `date_time` value in the `ref` data, using `calculate_regression()`. The reference file must contain a `date_time` column (measurement start times), a `site` column, and an `analyzer` column (the analyzer identifier, e.g. `"1337"`). The measurement duration, referred to as `duration_minutes`, is set to a default of 7 minutes, and the number of rows used for the regression, also denoted as `num_rows`, defaults to 300 rows (which is equivalent to 5 minutes). These values can be modified if desired.
 
 When the measurement duration (specified by `duration_minutes`) exceeds the data used for regression (specified by `num_rows`), this function automatically selects the rows with the highest R$^2$ within the defined interval.
 
-In the output tibble, `start_time` and `end_time` indicate the time range of the data used for the regression. `slope` represents the slope, and `r_square` denotes the R$^2$ value of the regression. `reference_time` is the start time of the measurement from the input.
+In the output tibble, `start_time` and `end_time` indicate the time range of the data used for the regression. `slope` represents the slope, and `r_square` denotes the R$^2$ value of the regression. `reference_time` is the start time of the measurement from the input. `site` and `analyzer` are carried over from the reference file.
 
 ```{r}
-calculate_regression(ch4, ghg = "CH4", reference_time = ref$date_time,
+calculate_regression(ch4, ref, ghg = "CH4", reference_time = "date_time",
+                     site = "site", analyzer_code = "1337",
                      duration_minutes = 7, num_rows = 300)
 ```
 
 ### Method 2: Type directly in R
 
-The start time of measurement can also be input directly into the function. Please note that the reference_time must be in POSIXct format.
+The reference information can also be constructed directly in R as a data frame.
 
 ```{r}
-calculate_regression(ch4, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00", tz = "UTC"))
+ref_direct <- data.frame(
+  date_time = as.POSIXct("2023-03-11 07:32:00", tz = "Asia/Taipei"),
+  site = "S1",
+  analyzer = "1337"
+)
+calculate_regression(ch4, ref_direct, ghg = "CH4", reference_time = "date_time",
+                     site = "site", analyzer_code = "1337")
 ```
 
 ## Calculate the flux
@@ -97,7 +104,8 @@ where S is the slope obtained from the linear regression of GHG concentration ch
 Therefore, the function `calculate_ghg_flux()` requires a dataframe with columns for the slope, area, volume, and temperature. Note that the units of the parameters must match those described above, resulting in a flux with units of mmol m$^{-2}$ d$^{-1}$.
 
 ```{r}
-results_ch4 <- calculate_regression(ch4, ghg = "CH4", reference_time = as.POSIXct("2023-03-11 07:32:00", tz = "UTC"))
+results_ch4 <- calculate_regression(ch4, ref_direct, ghg = "CH4", reference_time = "date_time",
+                                    site = "site", analyzer_code = "1337")
 flux_ch4 <- data.frame(
     slope = results_ch4$slope,
     area = 1, # in square meter

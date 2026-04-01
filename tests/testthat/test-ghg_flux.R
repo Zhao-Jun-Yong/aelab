@@ -21,11 +21,20 @@ test_that("calculate_regression returns correct results", {
     CH4 = sample(1:100, 420, replace = TRUE)
   )
 
-  reference_time <- as.POSIXct("2024-12-16 12:00:00", tz = "Asia/Taipei")
-  result <- calculate_regression(data, "CH4", reference_time)
+  reference_df <- data.frame(
+    date_time = as.POSIXct("2024-12-16 12:00:00", tz = "Asia/Taipei"),
+    site = "S1",
+    analyzer = "TEST"
+  )
+  result <- calculate_regression(data, reference_df, "CH4",
+                                 reference_time = "date_time",
+                                 site = "site",
+                                 analyzer_code = "TEST")
 
   expect_equal(nrow(result), 1)  # Expecting one result
   expect_true("slope" %in% colnames(result))  # Check if slope is calculated
+  expect_true("site" %in% colnames(result))
+  expect_true("analyzer" %in% colnames(result))
 })
 
 test_that("convert_ghg_unit converts correctly", {

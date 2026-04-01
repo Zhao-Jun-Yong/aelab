@@ -6,30 +6,47 @@
 \usage{
 calculate_regression(
   data,
+  reference_df,
   ghg,
   reference_time,
+  site,
+  analyzer_code,
   duration_minutes = 7,
   num_rows = 300
 )
 }
 \arguments{
-\item{data}{Data from the LI-COR Trace Gas Analyzer that has been processed and time-converted.}
+\item{data}{Data from the GHG analyzer that has been processed and time-converted.}
 
-\item{ghg}{Column name of the file containing data on GHG concentration (e.g., "CH4", "N2O").}
+\item{reference_df}{A data frame containing measurement reference times, site names, and an \code{analyzer} column.}
 
-\item{reference_time}{The date and time at which the measurement started.}
+\item{ghg}{Column name in \code{data} containing GHG concentration values (e.g., \code{"CH4"}, \code{"N2O"}).}
 
-\item{duration_minutes}{The duration  of the measurement, default to 7.}
+\item{reference_time}{Column name in \code{reference_df} containing the measurement start times (POSIXct).}
+
+\item{site}{Column name in \code{reference_df} containing site identifiers.}
+
+\item{analyzer_code}{String pattern used to filter results by the \code{analyzer} column of \code{reference_df}.}
+
+\item{duration_minutes}{The duration of the measurement, default to 7.}
 
 \item{num_rows}{The number of rows used to perform the regression, default to 300.}
 }
 \value{
-A tibble containing the time range (POSIXct format) of the slope and R2 (both numeric) from the simple linear regression.
+A tibble containing the time range, slope, R2, site, and analyzer from the simple linear regression.
 }
 \description{
 Calculate the slope of greenhouse gas (GHG) concentration change over time using simple linear regression.
 }
 \examples{
 data(n2o)
-calculate_regression(n2o, "N2O", as.POSIXct("2023-05-04 09:16:15", tz = "UTC"))
+n2o_converted <- convert_time(n2o)
+ref <- data.frame(
+  date_time = as.POSIXct("2023-05-04 09:16:15", tz = "Asia/Taipei"),
+  site = "S1",
+  analyzer = "1074"
+)
+calculate_regression(n2o_converted, ref, "N2O",
+                     reference_time = "date_time", site = "site",
+                     analyzer_code = "1074")
 }
