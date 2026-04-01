@@ -3,7 +3,8 @@
     "allow": [
       "Bash(Rscript -e \"devtools::document\\(quiet = TRUE\\)\")",
       "Bash(bash:*)",
-      "Bash(Rscript -e \"devtools::check\\(\\)\")"
+      "Bash(Rscript -e \"devtools::check\\(\\)\")",
+      "Bash(sed:*)"
     ]
   }
 }
