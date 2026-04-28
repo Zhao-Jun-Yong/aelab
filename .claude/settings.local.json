@@ -5,7 +5,15 @@
       "Bash(bash:*)",
       "Bash(Rscript -e \"devtools::check\\(\\)\")",
       "Bash(sed:*)",
-      "Bash(Rscript -e \"devtools::submit_cran\\(\\)\")"
+      "Bash(Rscript -e \"devtools::submit_cran\\(\\)\")",
+      "Bash(Rscript -e \"devtools::document\\(\\)\")",
+      "Bash(distill \"Did document\\(\\) succeed? What exports or importFrom lines were added or changed? Return a concise summary.\")",
+      "Bash(Rscript -e ' *)",
+      "Bash(distill \"Did sig_labels run without errors? What does the output look like? Return: SUCCESS or FAIL, plus the output columns and row count.\")",
+      "Bash(Rscript -e \"devtools::test\\(filter = 'statistics'\\)\")",
+      "Bash(distill \"Did all statistics tests pass? Return: PASS or FAIL, plus any failing test names and error messages.\")",
+      "Bash(distill \"Did R CMD check pass? List all ERRORs and WARNINGs \\(not NOTEs\\). Return: PASS or FAIL with a bullet list of any ERRORs/WARNINGs found.\")",
+      "Bash(air --version)"
     ]
   }
 }
