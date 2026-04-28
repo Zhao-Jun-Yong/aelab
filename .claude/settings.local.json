@@ -4,7 +4,8 @@
       "Bash(Rscript -e \"devtools::document\\(quiet = TRUE\\)\")",
       "Bash(bash:*)",
       "Bash(Rscript -e \"devtools::check\\(\\)\")",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(Rscript -e \"devtools::submit_cran\\(\\)\")"
     ]
   }
 }

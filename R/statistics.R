@@ -196,16 +196,35 @@ ks_test <- function(df, variable_name, group) {
     stop(paste("Group", group, "not found in dataframe."))
   }
 
-  formula      <- stats::as.formula(paste(variable_name, "~", group))
-  ks_results   <- stats::kruskal.test(formula, data = df)
+  formula    <- stats::as.formula(paste(variable_name, "~", group))
+  ks_results <- stats::kruskal.test(formula, data = df)
 
-  dunn_results <- FSA::dunnTest(df[[variable_name]], df[[group]], method = "bonferroni")
+  # cldList -> multcompLetters -> vec2mat2 splits comparison names on "-",
+  # expecting exactly one per name. Sanitize group names containing "-" first.
+  orig_levels <- as.character(unique(df[[group]]))
+  safe_levels <- gsub("-", ".", orig_levels, fixed = TRUE)
+  level_map   <- stats::setNames(orig_levels, safe_levels)  # safe -> orig
+
+  df_safe          <- df
+  df_safe[[group]] <- gsub("-", ".", as.character(df[[group]]), fixed = TRUE)
+
+  dunn_results <- FSA::dunnTest(df_safe[[variable_name]], df_safe[[group]], method = "bonferroni")
   dunn_results <- dunn_results$res
 
   label <- rcompanion::cldList(
     comparison = dunn_results$Comparison,
     p.value    = dunn_results$P.adj,
     threshold  = 0.05
+  )
+
+  # Restore original group names (replace longest safe names first to avoid
+  # partial-match corruption, e.g. "CR.I" vs "CR.I1")
+  sorted_safe <- names(level_map)[order(nchar(names(level_map)), decreasing = TRUE)]
+  label$Group <- level_map[label$Group]
+  dunn_results$Comparison <- Reduce(
+    function(s, safe) gsub(safe, level_map[[safe]], s, fixed = TRUE),
+    sorted_safe,
+    dunn_results$Comparison
   )
 
   mean_summary <- df |>
