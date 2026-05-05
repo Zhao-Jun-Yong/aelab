@@ -1,3 +1,19 @@
+# aelab 1.1.3
+
+## New functions
+
+* `sig_labels()` — runs Kruskal-Wallis + Dunn tests per facet level and returns a `geom_text`-ready data frame with compact letter display (CLD) annotations. Facets where Kruskal-Wallis p ≥ `alpha` are silently dropped.
+
+## Bug fixes
+
+* `ks_test()` now correctly handles group names that contain hyphens. Labels were previously corrupted because `cldList` splits comparison strings on `-`; group names are now sanitised to dots before Dunn testing and restored in the output.
+
+# aelab 1.1.2
+
+## Modified functions
+
+* `calculate_regression()` — function signature updated. `reference_time` is replaced by a `reference_df` argument (a data frame with measurement start times, site, and analyzer identifier). New `site` and `analyzer_code` parameters carry metadata through to the output tibble, which now includes `site` and `analyzer` columns.
+
 # aelab 1.1.0
 
 ## New functions
