@@ -1,3 +1,24 @@
+test_that("ks_test returns correct structure", {
+  df <- data.frame(
+    grp = rep(c("A", "B", "C"), each = 5),
+    val = c(1, 2, 1, 2, 1, 3, 4, 3, 4, 3, 5, 6, 5, 6, 5)
+  )
+  res <- ks_test(df, "val", "grp")
+  expect_named(res, c("ks_results", "dunn_results", "mean_summary", "compact_letters"))
+  expect_s3_class(res$ks_results, "htest")
+  expect_true(all(c("Group", "Letter") %in% names(res$compact_letters)))
+})
+
+test_that("ks_test handles group names containing hyphens without error", {
+  df <- data.frame(
+    grp = rep(c("CR-I", "CR-II", "CR-III"), each = 5),
+    val = c(1, 2, 1, 2, 1, 3, 4, 3, 4, 3, 5, 6, 5, 6, 5)
+  )
+  res <- ks_test(df, "val", "grp")
+  expect_true(all(res$compact_letters$Group %in% c("CR-I", "CR-II", "CR-III")))
+  expect_true(all(grepl("-", res$dunn_results$Comparison)))
+})
+
 test_that("sig_labels returns non-empty data frame for data with clear group differences", {
   df <- data.frame(
     year = rep("2023", 20),
