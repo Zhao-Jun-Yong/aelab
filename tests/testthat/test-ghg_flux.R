@@ -250,3 +250,99 @@ test_that("convert_ghg_unit converts correctly", {
 test_that("convert_ghg_unit throws error for invalid GHG", {
   expect_error(convert_ghg_unit(1, "invalid_gas"), "Invalid GHG type")
 })
+
+test_that("g_factor is NA for explicit linear fit_type", {
+  elapsed <- seq(0, 419)
+  data <- data.frame(
+    real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
+                               by = "sec", length.out = 420),
+    CH4 = 2 + 0.01 * elapsed
+  )
+  ref <- data.frame(
+    date_time = as.POSIXct("2024-12-16 12:00:00", tz = "Asia/Taipei"),
+    site = "S1", analyzer = "TEST"
+  )
+  result <- calculate_regression(data, ref, "CH4",
+                                 reference_time = "date_time",
+                                 site = "site", analyzer_code = "TEST",
+                                 fit_type = "linear")
+  expect_true(is.na(result$g_factor))
+})
+
+test_that("g_factor is NA when auto mode selects linear (no upgrade)", {
+  elapsed <- seq(0, 419)
+  data <- data.frame(
+    real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
+                               by = "sec", length.out = 420),
+    CH4 = 2 + 0.01 * elapsed
+  )
+  ref <- data.frame(
+    date_time = as.POSIXct("2024-12-16 12:00:00", tz = "Asia/Taipei"),
+    site = "S1", analyzer = "TEST"
+  )
+  result <- calculate_regression(data, ref, "CH4",
+                                 reference_time = "date_time",
+                                 site = "site", analyzer_code = "TEST",
+                                 fit_type = "auto", window_type = "fixed",
+                                 duration_minutes = 7)
+  expect_equal(result$fit_used, "linear")
+  expect_true(is.na(result$g_factor))
+})
+
+test_that("g_factor is computed when auto mode selects quadratic", {
+  elapsed <- seq(0, 419)
+  # Strong quadratic: lm slope ~0.020, quadratic initial slope 0.01 → g_factor ~0.49
+  data <- data.frame(
+    real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
+                               by = "sec", length.out = 420),
+    CH4 = 2 + 0.01 * elapsed + 0.00005 * elapsed^2
+  )
+  ref <- data.frame(
+    date_time = as.POSIXct("2024-12-16 12:00:00", tz = "Asia/Taipei"),
+    site = "S1", analyzer = "TEST"
+  )
+  result <- calculate_regression(data, ref, "CH4",
+                                 reference_time = "date_time",
+                                 site = "site", analyzer_code = "TEST",
+                                 fit_type = "auto", window_type = "fixed",
+                                 duration_minutes = 7)
+  expect_equal(result$fit_used, "quadratic")
+  expect_false(is.na(result$g_factor))
+  # Quadratic initial slope (0.01) < lm slope (~0.02), so g_factor < 1
+  expect_lt(result$g_factor, 1)
+  expect_gt(result$g_factor, 0)
+})
+
+test_that("g_factor_threshold overrides ok to discard when ratio exceeds limit", {
+  elapsed <- seq(0, 419)
+  data <- data.frame(
+    real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
+                               by = "sec", length.out = 420),
+    CH4 = 2 + 0.01 * elapsed + 0.00005 * elapsed^2
+  )
+  ref <- data.frame(
+    date_time = as.POSIXct("2024-12-16 12:00:00", tz = "Asia/Taipei"),
+    site = "S1", analyzer = "TEST"
+  )
+  result_no_gf <- calculate_regression(data, ref, "CH4",
+                                       reference_time = "date_time",
+                                       site = "site", analyzer_code = "TEST",
+                                       fit_type = "auto", window_type = "fixed",
+                                       duration_minutes = 7)
+  # g_factor ~0.32; threshold 0.2 triggers discard, threshold 0.5 does not
+  result_triggered <- calculate_regression(data, ref, "CH4",
+                                           reference_time = "date_time",
+                                           site = "site", analyzer_code = "TEST",
+                                           fit_type = "auto", window_type = "fixed",
+                                           duration_minutes = 7,
+                                           g_factor_threshold = 0.2)
+  result_not_triggered <- calculate_regression(data, ref, "CH4",
+                                               reference_time = "date_time",
+                                               site = "site", analyzer_code = "TEST",
+                                               fit_type = "auto", window_type = "fixed",
+                                               duration_minutes = 7,
+                                               g_factor_threshold = 0.5)
+  expect_equal(result_no_gf$flag, "ok")
+  expect_equal(result_triggered$flag, "discard")    # g_factor ~0.32, threshold 0.2 triggers
+  expect_equal(result_not_triggered$flag, "ok")     # g_factor ~0.32, threshold 0.5 does not
+})

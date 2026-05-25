@@ -204,7 +204,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
     duration_s <- max(elapsed_s) - min(elapsed_s)
 
     # Step 1: linear (baseline)
-    best <- .lm_result()
+    best     <- .lm_result()
+    lm_slope <- best$slope  # saved for g-factor computation
 
     # kappamax (Hüppi et al. 2018): reject exp_tz if b > |slope_lm| / precision.
     # Strong fluxes tolerate more curvature; near-detection-limit measurements stay linear.
@@ -227,6 +228,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
       best <- exp_res
     }
 
+    best$slope_lm <- lm_slope
     return(best)
   }
 
@@ -278,10 +280,19 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   Only applies when \code{fit_type} is \code{"exp_tz"} or \code{"exp_zhao18"}. When \eqn{b > \kappa_{max}},
 #'   the fit implies an implausibly fast equilibration and the slope is replaced by the linear
 #'   equivalent. Corresponds to the \emph{kappamax} quality criterion in Hüppi et al. (2018).
+#' @param g_factor_threshold Optional. Maximum acceptable ratio of the chosen model slope to the
+#'   linear baseline slope (g-factor; Gaudard et al. 2025). Only computed when
+#'   \code{fit_type = "auto"} and the selected model is not linear. Values far from 1 indicate
+#'   that the nonlinear model diverges strongly from the linear fit, which may signal noise
+#'   artefacts or poor convergence. When this threshold is exceeded, the flag is overridden to
+#'   \code{"discard"}. Default \code{NULL} (disabled). A value of 2 flags measurements where
+#'   the nonlinear slope is more than twice the linear slope.
 #' @return A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\eqn{^{-1}}),
 #'   \code{r_square}, \code{correlation}, \code{b_param} (exponential curvature; \code{NA} for
 #'   linear/quadratic), \code{fit_used} (model actually used: \code{"linear"}, \code{"quadratic"},
 #'   or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}),
+#'   \code{g_factor} (ratio of chosen slope to linear baseline slope; \code{NA} when
+#'   \code{fit_used = "linear"} or for explicit non-auto fits),
 #'   \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),
 #'   \code{reference_time}, \code{site}, \code{analyzer}.
 #' @examples
@@ -304,7 +315,8 @@ calculate_regression <- function(data, reference_df, ghg,
                                  window_type = "sliding", start_offset_s = 0,
                                  r2_threshold = 0.8, cor_threshold = 0.5,
                                  instrument_precision = NULL,
-                                 kappamax = NULL) {
+                                 kappamax = NULL,
+                                 g_factor_threshold = NULL) {
 
   fit_type    <- match.arg(fit_type,    c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
   window_type <- match.arg(window_type, c("sliding", "fixed"))
@@ -334,13 +346,14 @@ calculate_regression <- function(data, reference_df, ghg,
     filtered_data <- data[data$real_datetime >= start_time & data$real_datetime <= end_time, ]
     sorted_data   <- filtered_data[order(filtered_data$real_datetime), ]
 
-    best_r_square <- -Inf
-    best_slope    <- NA_real_
-    best_cor      <- NA_real_
-    best_b_param  <- NA_real_
-    best_fit_used <- fit_type
-    best_start_dt <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
-    best_end_dt   <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
+    best_r_square  <- -Inf
+    best_slope     <- NA_real_
+    best_slope_lm  <- NA_real_
+    best_cor       <- NA_real_
+    best_b_param   <- NA_real_
+    best_fit_used  <- fit_type
+    best_start_dt  <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
+    best_end_dt    <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
 
     if (window_type == "fixed") {
       win_start     <- reference_datetime + start_offset_s
@@ -357,6 +370,7 @@ calculate_regression <- function(data, reference_df, ghg,
                                         instrument_precision)
         best_r_square <- fit_out$r_square
         best_slope    <- fit_out$slope
+        best_slope_lm <- if (!is.null(fit_out$slope_lm)) fit_out$slope_lm else NA_real_
         best_b_param  <- fit_out$b_param
         best_fit_used <- fit_out$fit_used
         best_cor      <- if (!is.na(fit_out$r_square)) stats::cor(conc_vec, elapsed_s) else NA_real_
@@ -380,6 +394,7 @@ calculate_regression <- function(data, reference_df, ghg,
           if (!is.na(r_square) && r_square > best_r_square) {
             best_r_square <- r_square
             best_slope    <- fit_out$slope
+            best_slope_lm <- if (!is.null(fit_out$slope_lm)) fit_out$slope_lm else NA_real_
             best_b_param  <- fit_out$b_param
             best_fit_used <- fit_out$fit_used
             best_cor      <- stats::cor(conc_vec, elapsed_s)
@@ -409,6 +424,19 @@ calculate_regression <- function(data, reference_df, ghg,
       }
     }
 
+    # g-factor: ratio of chosen slope to linear baseline slope (auto mode only).
+    # Values far from 1 indicate the nonlinear model diverges strongly from linear.
+    g_factor <- if (!is.na(best_slope_lm) && !is.na(best_slope) &&
+                    best_slope_lm != 0 && best_fit_used != "linear")
+      best_slope / best_slope_lm
+    else NA_real_
+
+    # g-factor threshold check: override "ok" to "discard" when divergence is too large.
+    if (!is.null(g_factor_threshold) && !is.na(g_factor) && flag == "ok" &&
+        abs(g_factor) > g_factor_threshold) {
+      flag <- "discard"
+    }
+
     tibble(
       start_time     = format(best_start_dt, "%Y/%m/%d %H:%M:%S"),
       end_time       = format(best_end_dt, "%Y/%m/%d %H:%M:%S"),
@@ -417,6 +445,7 @@ calculate_regression <- function(data, reference_df, ghg,
       correlation    = best_cor,
       b_param        = best_b_param,
       fit_used       = best_fit_used,
+      g_factor       = g_factor,
       flag           = flag,
       reference_time = reference_time_vec[i],
       site           = reference_site[i],

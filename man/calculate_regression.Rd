@@ -20,7 +20,8 @@ calculate_regression(
   r2_threshold = 0.8,
   cor_threshold = 0.5,
   instrument_precision = NULL,
-  kappamax = NULL
+  kappamax = NULL,
+  g_factor_threshold = NULL
 )
 }
 \arguments{
@@ -66,20 +67,33 @@ Only used when \code{window_type = "fixed"}. Default 0.}
 \item{cor_threshold}{Minimum absolute Pearson correlation between concentration and elapsed time.
 Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.}
 
-\item{instrument_precision}{Optional. Analyser precision in ppm. When provided, measurements
-whose absolute slope falls below \code{instrument_precision / window_duration_s} are flagged
-\code{"zero"} even if R² and correlation pass.}
+\item{instrument_precision}{Optional. Analyser precision in ppm. Used in two ways:
+(1) minimum-detectable-slope check — measurements whose absolute slope falls below
+\code{instrument_precision / window_duration_s} are flagged \code{"zero"} even if R²
+and correlation pass; (2) kappamax for \code{fit_type = "auto"} — following Hüppi et al.
+(2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
+fluxes permit more curvature and near-detection-limit measurements are kept linear.}
 
 \item{kappamax}{Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
 Only applies when \code{fit_type} is \code{"exp_tz"} or \code{"exp_zhao18"}. When \eqn{b > \kappa_{max}},
 the fit implies an implausibly fast equilibration and the slope is replaced by the linear
 equivalent. Corresponds to the \emph{kappamax} quality criterion in Hüppi et al. (2018).}
+
+\item{g_factor_threshold}{Optional. Maximum acceptable ratio of the chosen model slope to the
+linear baseline slope (g-factor; Gaudard et al. 2025). Only computed when
+\code{fit_type = "auto"} and the selected model is not linear. Values far from 1 indicate
+that the nonlinear model diverges strongly from the linear fit, which may signal noise
+artefacts or poor convergence. When this threshold is exceeded, the flag is overridden to
+\code{"discard"}. Default \code{NULL} (disabled). A value of 2 flags measurements where
+the nonlinear slope is more than twice the linear slope.}
 }
 \value{
 A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\eqn{^{-1}}),
   \code{r_square}, \code{correlation}, \code{b_param} (exponential curvature; \code{NA} for
   linear/quadratic), \code{fit_used} (model actually used: \code{"linear"}, \code{"quadratic"},
   or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}),
+  \code{g_factor} (ratio of chosen slope to linear baseline slope; \code{NA} when
+  \code{fit_used = "linear"} or for explicit non-auto fits),
   \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),
   \code{reference_time}, \code{site}, \code{analyzer}.
 }
