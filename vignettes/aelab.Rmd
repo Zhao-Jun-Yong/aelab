@@ -66,17 +66,61 @@ ref <- read_excel(ref_data_path)
 ref
 ```
 
-Now, we can perform multiple simple linear regressions on the GHG concentrations, separated by the `date_time` value in the `ref` data, using `calculate_regression()`. The reference file must contain a `date_time` column (measurement start times), a `site` column, and an `analyzer` column (the analyzer identifier, e.g. `"1337"`). The measurement duration, referred to as `duration_minutes`, is set to a default of 7 minutes, and the number of rows used for the regression, also denoted as `num_rows`, defaults to 300 rows (which is equivalent to 5 minutes). These values can be modified if desired.
+Now, we can perform regressions on the GHG concentrations using `calculate_regression()`. The reference file must contain a `date_time` column (measurement start times), a `site` column, and an `analyzer` column (e.g. `"1337"`).
 
-When the measurement duration (specified by `duration_minutes`) exceeds the data used for regression (specified by `num_rows`), this function automatically selects the rows with the highest R$^2$ within the defined interval.
+### Window type
 
-In the output tibble, `start_time` and `end_time` indicate the time range of the data used for the regression. `slope` represents the slope, and `r_square` denotes the R$^2$ value of the regression. `reference_time` is the start time of the measurement from the input. `site` and `analyzer` are carried over from the reference file.
+Two window modes are available via `window_type`:
+
+- **`"sliding"`** (default): moves a fixed-length sub-window (default `num_rows = 300` rows ≈ 5 min) across the full measurement period and keeps the position with the highest R². Useful when the exact measurement start is uncertain.
+- **`"fixed"`**: fits a single window of `duration_minutes` starting at `start_offset_s` seconds after the reference time. More reproducible — all gases are evaluated over the same interval. The first 30 s of chamber deployment are mechanically disturbed; skipping them with `start_offset_s = 30` is recommended.
 
 ```{r}
+# Sliding window (default): best 5-min sub-window within 7-min period
 calculate_regression(ch4, ref, ghg = "CH4", reference_time = "date_time",
                      site = "site", analyzer_code = "1337",
                      duration_minutes = 7, num_rows = 300)
+
+# Fixed window: regress from t+30 s to t+7 min (skips dead-bar period)
+calculate_regression(ch4, ref, ghg = "CH4", reference_time = "date_time",
+                     site = "site", analyzer_code = "1337",
+                     window_type = "fixed", start_offset_s = 30)
 ```
+
+### Model selection
+
+The `fit_type` parameter controls the regression model:
+
+- **`"linear"`** (default): ordinary least-squares slope. Valid when concentration change is small relative to ambient.
+- **`"quadratic"`**: second-order polynomial; the reported slope is the initial rate at t = 0 (the coefficient of *t*).
+- **`"exp_tz"`** / **`"exp_zhao18"`**: Hutchinson–Mosier nonlinear exponential models; slope evaluated at `t_zero`.
+- **`"auto"`**: tries linear → quadratic → exp_tz in sequence, accepting a more complex model only when R² improves by > 0.01 and the exponential curvature parameter *b* does not exceed κ~max~ (Hüppi et al. 2018). The model chosen for each measurement is recorded in the `fit_used` output column.
+
+When `fit_type = "auto"`, analyser precision is looked up automatically from the built-in `analyzer_precision` dataset (LI-7810 and LI-7820) if `instrument_precision` is not supplied.
+
+```{r}
+# Auto model selection with fixed window and 30-s dead-bar skip
+calculate_regression(ch4, ref, ghg = "CH4", reference_time = "date_time",
+                     site = "site", analyzer_code = "1337",
+                     fit_type = "auto",
+                     window_type = "fixed", start_offset_s = 30)
+```
+
+### Quality flags
+
+Each measurement receives a `flag` in the output:
+
+| Flag | Meaning |
+|---|---|
+| `ok` | R² ≥ threshold and correlation ≥ threshold; use this slope |
+| `discard` | Detectable trend but poor fit (R² below threshold) |
+| `zero` | No detectable trend (correlation below threshold, or slope within instrument noise) |
+| `no_data` | Insufficient data in the window |
+
+Two optional parameters tighten the QC:
+
+- **`instrument_precision`**: analyser precision in ppm. Slopes whose absolute value falls below `precision / window_duration_s` are flagged `"zero"` even if R² passes. Also used by `fit_type = "auto"` to compute κ~max~ per measurement.
+- **`g_factor_threshold`**: when `fit_type = "auto"` selects a nonlinear model, the g-factor (chosen slope / linear baseline slope) is computed and recorded in the `g_factor` output column. If `abs(g_factor) > g_factor_threshold`, the flag is overridden to `"discard"` (Gaudard et al. 2025). Default `NULL` (disabled).
 
 ### Method 2: Type directly in R
 
@@ -107,11 +151,12 @@ Therefore, the function `calculate_ghg_flux()` requires a dataframe with columns
 ```{r}
 results_ch4 <- calculate_regression(ch4, ref_direct, ghg = "CH4", reference_time = "date_time",
                                     site = "site", analyzer_code = "1337")
+# In practice, filter to flag == "ok" before calculating flux
 flux_ch4 <- data.frame(
-    slope = results_ch4$slope,
-    area = 1, # in square meter
+    slope  = results_ch4$slope,
+    area   = 1, # in square meter
     volume = 1, # in litre
-    temp = 1) # in celcius
+    temp   = 1) # in celsius
 calculate_ghg_flux(flux_ch4)
 ```
 
@@ -325,5 +370,10 @@ plot_box(df_vis, site, ch4, site) +
 
 # Reference
 
+Gaudard, J., Telford, R. J., & Halbritter, A. H. (2025). fluxible: An R package to process ecosystem gas fluxes from closed-loop chambers in an automated and reproducible way. Methods in Ecology and Evolution, 00, 1–9. https://doi.org/10.1111/2041-210X.70161
+
+Hüppi, R., Felber, R., Krauss, M., Six, J., Leifeld, J., & Fuß, R. (2018). Restricting the nonlinearity parameter in soil greenhouse gas flux calculations for more reliable flux estimates. PLOS ONE, 13(7), e0200876. https://doi.org/10.1371/journal.pone.0200876
+
 Staehr, P. A., Bade, D., Van de Bogert, M. C., Koch, G. R., Williamson, C., Hanson, P., Cole, J. J., & Kratz, T. (2010). Lake metabolism and the diel oxygen technique: State of the science. Limnology and Oceanography: Methods, 8(11), 628–644. https://doi.org/10.4319/lom.2010.8.0628
+
 Yong, Z.-J., Lin, W.-J., Lin, C.-W., & Lin, H.-J. (2024). Tidal influence on carbon dioxide and methane fluxes from tree stems and soils in mangrove forests. Biogeosciences, 21(22), 5247–5260. https://doi.org/10.5194/bg-21-5247-2024
