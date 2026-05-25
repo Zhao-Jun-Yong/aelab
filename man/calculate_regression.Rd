@@ -12,7 +12,15 @@ calculate_regression(
   site,
   analyzer_code,
   duration_minutes = 7,
-  num_rows = 300
+  num_rows = 300,
+  fit_type = "linear",
+  t_zero = 0,
+  window_type = "sliding",
+  start_offset_s = 0,
+  r2_threshold = 0.8,
+  cor_threshold = 0.5,
+  instrument_precision = NULL,
+  kappamax = NULL
 )
 }
 \arguments{
@@ -28,21 +36,61 @@ calculate_regression(
 
 \item{analyzer_code}{String pattern used to filter results by the \code{analyzer} column of \code{reference_df}.}
 
-\item{duration_minutes}{The duration of the measurement, default to 7.}
+\item{duration_minutes}{The duration of the measurement window in minutes. Default 7.}
 
-\item{num_rows}{The number of rows used to perform the regression, default to 300.}
+\item{num_rows}{The number of rows used per sliding regression window. Only used when
+\code{window_type = "sliding"}. Default 300.}
+
+\item{fit_type}{Model used to fit the concentration curve. One of \code{"linear"} (default),
+\code{"quadratic"} (second-order polynomial; slope is the initial rate at t=0),
+\code{"exp_tz"} (exponential with linear drift and user-specified \code{t_zero}),
+\code{"exp_zhao18"} (exponential with linear drift and estimated t0), or
+\code{"auto"} (automatic model selection: tries linear → quadratic → exp_tz in order,
+accepting a more complex model only when R² improves by > 0.01 and, for exp_tz, the
+curvature parameter κ does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
+\code{instrument_precision = NULL}, precision is looked up from \code{\link{analyzer_precision}}
+by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.}
+
+\item{t_zero}{Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.}
+
+\item{window_type}{\code{"sliding"} (default) selects the \code{num_rows}-length sub-window with
+the best R² within the measurement period. \code{"fixed"} fits a single window starting at
+\code{start_offset_s} seconds after the reference time and running for \code{duration_minutes}.
+Use \code{"fixed"} to ensure all gases are regressed over the same time window.}
+
+\item{start_offset_s}{Seconds to skip from the reference time before the regression window starts.
+Only used when \code{window_type = "fixed"}. Default 0.}
+
+\item{r2_threshold}{Minimum R-squared for a measurement to pass quality check. Default 0.8.}
+
+\item{cor_threshold}{Minimum absolute Pearson correlation between concentration and elapsed time.
+Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.}
+
+\item{instrument_precision}{Optional. Analyser precision in ppm. When provided, measurements
+whose absolute slope falls below \code{instrument_precision / window_duration_s} are flagged
+\code{"zero"} even if R² and correlation pass.}
+
+\item{kappamax}{Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
+Only applies when \code{fit_type} is \code{"exp_tz"} or \code{"exp_zhao18"}. When \eqn{b > \kappa_{max}},
+the fit implies an implausibly fast equilibration and the slope is replaced by the linear
+equivalent. Corresponds to the \emph{kappamax} quality criterion in Hüppi et al. (2018).}
 }
 \value{
-A tibble containing the time range, slope, R2, site, and analyzer from the simple linear regression.
+A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\eqn{^{-1}}),
+  \code{r_square}, \code{correlation}, \code{b_param} (exponential curvature; \code{NA} for
+  linear/quadratic), \code{fit_used} (model actually used: \code{"linear"}, \code{"quadratic"},
+  or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}),
+  \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),
+  \code{reference_time}, \code{site}, \code{analyzer}.
 }
 \description{
-Calculate the slope of greenhouse gas (GHG) concentration change over time using simple linear regression.
+Calculate the slope of GHG concentration change over time using linear or exponential regression.
 }
 \examples{
 data(n2o)
 n2o_converted <- convert_time(n2o)
 ref <- data.frame(
-  date_time = as.POSIXct("2023-05-04 09:16:15", tz = "Asia/Taipei"),
+  date_time = n2o_converted$real_datetime[1],
   site = "S1",
   analyzer = "1074"
 )

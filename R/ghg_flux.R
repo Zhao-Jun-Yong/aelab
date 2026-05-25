@@ -5,17 +5,24 @@ utils::globalVariables(c("CO2", "CH4", "N2O"))
 #' @importFrom readxl read_excel
 #' @importFrom openxlsx convertToDateTime
 #' @importFrom dplyr filter
-#' @description Tidy the data downloaded from GHG Analyzer.
+#' @description Tidy the data downloaded from GHG Analyzer, with optional timestamp correction.
 #' @param file_path Directory of file.
 #' @param gas Choose between CO2/CH4 or N2O LI-COR Trace Gas Analyzer, which is "ch4" and "n2o", respectively.
 #' @param analyzer The brand of the analyzer which the data was downloaded from.
-#' @return Return the loaded XLSX file after tidying for further analysis.
+#' @param day Day offset to correct the analyzer timestamp.
+#' @param hr Hour offset to correct the analyzer timestamp.
+#' @param min Minute offset to correct the analyzer timestamp.
+#' @param sec Second offset to correct the analyzer timestamp.
+#' @return Return the loaded XLSX file after tidying. If any time offset is non-zero, a
+#'   \code{real_datetime} column is added via \code{\link{convert_time}}.
 #' @examples
 #' ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab")
 #' tidy_ghg_analyzer(ghg_data_path, "ch4")
+#' tidy_ghg_analyzer(ghg_data_path, "ch4", sec = -30)
 #' @export
 
-tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor") {
+tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
+                               day = 0, hr = 0, min = 0, sec = 0) {
 
   # Import data from the specified Excel file
   data <- readxl::read_excel(file_path)
@@ -70,7 +77,11 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor") {
     }
   }
 
-  # Return the tidied data frame
+  # Apply timestamp correction if any offset is provided
+  if (day != 0 || hr != 0 || min != 0 || sec != 0) {
+    data <- convert_time(data, day = day, hr = hr, min = min, sec = sec)
+  }
+
   return(data)
 
 }
@@ -105,27 +116,173 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 
 }
 
+# Internal helper: fit a GHG concentration curve and return slope, R², curvature b, and fit_used.
+# kappamax:            if provided and b > kappamax, exponential fits fall back to linear.
+# instrument_precision: only used when fit_type = "auto" to compute kappamax per window.
+.fit_ghg_model <- function(conc, elapsed_s, fit_type, t_zero,
+                           kappamax = NULL, instrument_precision = NULL) {
+  C0     <- conc[1]
+  ss_tot <- sum((conc - mean(conc))^2)
+
+  .lm_result <- function() {
+    fit <- stats::lm(conc ~ elapsed_s)
+    list(slope = unname(stats::coef(fit)[2]), r_square = summary(fit)$r.squared,
+         b_param = NA_real_, fit_used = "linear")
+  }
+
+  .quad_result <- function() {
+    fit <- stats::lm(conc ~ elapsed_s + I(elapsed_s^2))
+    list(slope = unname(stats::coef(fit)[2]), r_square = summary(fit)$r.squared,
+         b_param = NA_real_, fit_used = "quadratic")
+  }
+
+  .exp_tz_result <- function(kmax) {
+    Cm_start <- conc[length(conc)]
+    fit <- tryCatch(
+      stats::nls(conc ~ Cm + a * elapsed_s + (C0 - Cm) * exp(-b * elapsed_s),
+                 start   = list(Cm = Cm_start, a = 0, b = 0.001),
+                 control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
+      error = function(e) NULL)
+    if (is.null(fit)) return(NULL)
+    cf    <- stats::coef(fit)
+    b_val <- unname(cf["b"])
+    if (!is.null(kmax) && !is.na(b_val) && b_val > kmax) return(NULL)
+    slope <- cf["a"] + cf["b"] * (cf["Cm"] - C0) * exp(-cf["b"] * t_zero)
+    r_sq  <- if (ss_tot > 0) 1 - sum(stats::residuals(fit)^2) / ss_tot else NA_real_
+    list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_tz")
+  }
+
+  if (fit_type == "linear")    return(.lm_result())
+  if (fit_type == "quadratic") return(.quad_result())
+
+  if (fit_type == "exp_tz") {
+    Cm_start <- conc[length(conc)]
+    fit <- tryCatch(
+      stats::nls(conc ~ Cm + a * elapsed_s + (C0 - Cm) * exp(-b * elapsed_s),
+                 start   = list(Cm = Cm_start, a = 0, b = 0.001),
+                 control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
+      error = function(e) NULL)
+    if (is.null(fit)) return(list(slope = NA_real_, r_square = NA_real_,
+                                  b_param = NA_real_, fit_used = "exp_tz"))
+    cf    <- stats::coef(fit)
+    b_val <- unname(cf["b"])
+    if (!is.null(kappamax) && !is.na(b_val) && b_val > kappamax) {
+      lin <- stats::lm(conc ~ elapsed_s)
+      return(list(slope    = unname(stats::coef(lin)[2]),
+                  r_square = summary(lin)$r.squared,
+                  b_param  = b_val, fit_used = "linear"))
+    }
+    slope <- cf["a"] + cf["b"] * (cf["Cm"] - C0) * exp(-cf["b"] * t_zero)
+    r_sq  <- if (ss_tot > 0) 1 - sum(stats::residuals(fit)^2) / ss_tot else NA_real_
+    return(list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_tz"))
+  }
+
+  if (fit_type == "exp_zhao18") {
+    Cm_start <- conc[length(conc)]
+    fit <- tryCatch(
+      stats::nls(conc ~ Cm + a * (elapsed_s - t0) + (C0 - Cm) * exp(-b * (elapsed_s - t0)),
+                 start   = list(Cm = Cm_start, a = 0, b = 0.001, t0 = 0),
+                 control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
+      error = function(e) NULL)
+    if (is.null(fit)) return(list(slope = NA_real_, r_square = NA_real_,
+                                  b_param = NA_real_, fit_used = "exp_zhao18"))
+    cf    <- stats::coef(fit)
+    b_val <- unname(cf["b"])
+    if (!is.null(kappamax) && !is.na(b_val) && b_val > kappamax) {
+      lin <- stats::lm(conc ~ elapsed_s)
+      return(list(slope    = unname(stats::coef(lin)[2]),
+                  r_square = summary(lin)$r.squared,
+                  b_param  = b_val, fit_used = "linear"))
+    }
+    slope <- cf["a"] + cf["b"] * (cf["Cm"] - C0)
+    r_sq  <- if (ss_tot > 0) 1 - sum(stats::residuals(fit)^2) / ss_tot else NA_real_
+    return(list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_zhao18"))
+  }
+
+  if (fit_type == "auto") {
+    # Compute kappamax from instrument precision and initial concentration
+    duration_s <- max(elapsed_s) - min(elapsed_s)
+    kmax <- if (!is.null(instrument_precision) && C0 > 0 && duration_s > 0)
+      instrument_precision / (C0 * duration_s)
+    else
+      1.5 / max(duration_s, 1)
+
+    # Step 1: linear (baseline)
+    best <- .lm_result()
+
+    # Step 2: quadratic — accept if meaningfully better (ΔR² > 0.01)
+    quad <- .quad_result()
+    if (!is.na(quad$r_square) && !is.na(best$r_square) &&
+        quad$r_square > best$r_square + 0.01) {
+      best <- quad
+    }
+
+    # Step 3: exp_tz with kappamax — accept if κ passes and meaningfully better
+    exp_res <- .exp_tz_result(kmax)
+    if (!is.null(exp_res) && !is.na(exp_res$r_square) && !is.na(best$r_square) &&
+        exp_res$r_square > best$r_square + 0.01) {
+      best <- exp_res
+    }
+
+    return(best)
+  }
+
+  stop(paste("Unknown fit_type:", fit_type,
+             ". Use 'linear', 'quadratic', 'exp_tz', 'exp_zhao18', or 'auto'."))
+}
+
 #' @import tibble
-#' @importFrom stats lm
-#' @importFrom stats coef
+#' @importFrom stats lm coef nls nls.control residuals cor
 #' @importFrom purrr map_dfr
 #' @importFrom stringr str_detect
 #' @title calculate_regression
-#' @description Calculate the slope of greenhouse gas (GHG) concentration change over time using simple linear regression.
+#' @description Calculate the slope of GHG concentration change over time using linear or exponential regression.
 #' @param data Data from the GHG analyzer that has been processed and time-converted.
 #' @param reference_df A data frame containing measurement reference times, site names, and an \code{analyzer} column.
 #' @param ghg Column name in \code{data} containing GHG concentration values (e.g., \code{"CH4"}, \code{"N2O"}).
 #' @param reference_time Column name in \code{reference_df} containing the measurement start times (POSIXct).
 #' @param site Column name in \code{reference_df} containing site identifiers.
 #' @param analyzer_code String pattern used to filter results by the \code{analyzer} column of \code{reference_df}.
-#' @param duration_minutes The duration of the measurement, default to 7.
-#' @param num_rows The number of rows used to perform the regression, default to 300.
-#' @return A tibble containing the time range, slope, R2, site, and analyzer from the simple linear regression.
+#' @param duration_minutes The duration of the measurement window in minutes. Default 7.
+#' @param num_rows The number of rows used per sliding regression window. Only used when
+#'   \code{window_type = "sliding"}. Default 300.
+#' @param fit_type Model used to fit the concentration curve. One of \code{"linear"} (default),
+#'   \code{"quadratic"} (second-order polynomial; slope is the initial rate at t=0),
+#'   \code{"exp_tz"} (exponential with linear drift and user-specified \code{t_zero}),
+#'   \code{"exp_zhao18"} (exponential with linear drift and estimated t0), or
+#'   \code{"auto"} (automatic model selection: tries linear → quadratic → exp_tz in order,
+#'   accepting a more complex model only when R² improves by > 0.01 and, for exp_tz, the
+#'   curvature parameter κ does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
+#'   \code{instrument_precision = NULL}, precision is looked up from \code{\link{analyzer_precision}}
+#'   by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.
+#' @param t_zero Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.
+#' @param window_type \code{"sliding"} (default) selects the \code{num_rows}-length sub-window with
+#'   the best R² within the measurement period. \code{"fixed"} fits a single window starting at
+#'   \code{start_offset_s} seconds after the reference time and running for \code{duration_minutes}.
+#'   Use \code{"fixed"} to ensure all gases are regressed over the same time window.
+#' @param start_offset_s Seconds to skip from the reference time before the regression window starts.
+#'   Only used when \code{window_type = "fixed"}. Default 0.
+#' @param r2_threshold Minimum R-squared for a measurement to pass quality check. Default 0.8.
+#' @param cor_threshold Minimum absolute Pearson correlation between concentration and elapsed time.
+#'   Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.
+#' @param instrument_precision Optional. Analyser precision in ppm. When provided, measurements
+#'   whose absolute slope falls below \code{instrument_precision / window_duration_s} are flagged
+#'   \code{"zero"} even if R² and correlation pass.
+#' @param kappamax Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
+#'   Only applies when \code{fit_type} is \code{"exp_tz"} or \code{"exp_zhao18"}. When \eqn{b > \kappa_{max}},
+#'   the fit implies an implausibly fast equilibration and the slope is replaced by the linear
+#'   equivalent. Corresponds to the \emph{kappamax} quality criterion in Hüppi et al. (2018).
+#' @return A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\eqn{^{-1}}),
+#'   \code{r_square}, \code{correlation}, \code{b_param} (exponential curvature; \code{NA} for
+#'   linear/quadratic), \code{fit_used} (model actually used: \code{"linear"}, \code{"quadratic"},
+#'   or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}),
+#'   \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),
+#'   \code{reference_time}, \code{site}, \code{analyzer}.
 #' @examples
 #' data(n2o)
 #' n2o_converted <- convert_time(n2o)
 #' ref <- data.frame(
-#'   date_time = as.POSIXct("2023-05-04 09:16:15", tz = "Asia/Taipei"),
+#'   date_time = n2o_converted$real_datetime[1],
 #'   site = "S1",
 #'   analyzer = "1074"
 #' )
@@ -136,82 +293,296 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 
 calculate_regression <- function(data, reference_df, ghg,
                                  reference_time, site, analyzer_code,
-                                 duration_minutes = 7, num_rows = 300) {
+                                 duration_minutes = 7, num_rows = 300,
+                                 fit_type = "linear", t_zero = 0,
+                                 window_type = "sliding", start_offset_s = 0,
+                                 r2_threshold = 0.8, cor_threshold = 0.5,
+                                 instrument_precision = NULL,
+                                 kappamax = NULL) {
+
+  fit_type    <- match.arg(fit_type,    c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
+  window_type <- match.arg(window_type, c("sliding", "fixed"))
+
+  # For fit_type = "auto", resolve instrument_precision from the built-in table if not supplied
+  if (fit_type == "auto" && is.null(instrument_precision)) {
+    prec_row <- analyzer_precision[analyzer_precision$gas == toupper(ghg), ]
+    if (nrow(prec_row) > 0) instrument_precision <- prec_row$precision_ppm[1]
+  }
 
   reference_time_vec <- lubridate::force_tz(reference_df[[reference_time]], tzone = "Asia/Taipei")
-  reference_site     <- reference_df[[site]]
-  reference_analyzer <- reference_df$analyzer
+  reference_site     <- as.character(reference_df[[site]])
+  reference_analyzer <- as.character(reference_df$analyzer)
 
-  # Check if 'real_datetime' exists; if not, use 'date_time' as a fallback
   if (!"real_datetime" %in% colnames(data) && "date_time" %in% colnames(data)) {
     data$real_datetime <- data$date_time
   } else {
-    # Ensure 'real_datetime' is in the correct timezone
     data$real_datetime <- lubridate::force_tz(data$real_datetime, tzone = "Asia/Taipei")
   }
 
-  # Use map_dfr to iterate through each reference time (avoids O(n^2) rbind)
   results <- purrr::map_dfr(seq_along(reference_time_vec), function(i) {
     reference_datetime <- reference_time_vec[i]
 
-    # Define the start and end time for the regression window
     start_time <- reference_datetime
-    end_time <- reference_datetime + (as.numeric(duration_minutes)) * 60
+    end_time   <- reference_datetime + as.numeric(duration_minutes) * 60
 
-    # Filter data to include only rows within the specified time window
     filtered_data <- data[data$real_datetime >= start_time & data$real_datetime <= end_time, ]
+    sorted_data   <- filtered_data[order(filtered_data$real_datetime), ]
 
-    # Sort the filtered data by 'real_datetime'
-    sorted_data <- filtered_data[order(filtered_data$real_datetime), ]
-
-    # Initialize variables to track the best regression results
     best_r_square <- -Inf
-    best_slope <- NA
-    best_start_time <- NA
-    best_end_time <- NA
-    cor_site <- NA
-    cor_analyzer <- NA
+    best_slope    <- NA_real_
+    best_cor      <- NA_real_
+    best_b_param  <- NA_real_
+    best_fit_used <- fit_type
+    best_start_dt <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
+    best_end_dt   <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
 
-    # Loop through the sorted data to find the best regression fit
-    for (j in 1:(nrow(sorted_data) - num_rows + 1)) {
-      # Select a subset of data for regression
-      selected_data <- sorted_data[j:(j + num_rows - 1), ]
+    if (window_type == "fixed") {
+      win_start     <- reference_datetime + start_offset_s
+      win_end       <- win_start + as.numeric(duration_minutes) * 60
+      selected_data <- sorted_data[sorted_data$real_datetime >= win_start &
+                                   sorted_data$real_datetime <= win_end, ]
 
-      # Perform linear regression on the selected data
-      regression <- stats::lm(as.numeric(selected_data[[ghg]]) ~ seq_along(selected_data[[ghg]]))
+      if (nrow(selected_data) >= 2) {
+        elapsed_s     <- as.numeric(difftime(selected_data$real_datetime,
+                                             selected_data$real_datetime[1],
+                                             units = "secs"))
+        conc_vec      <- as.numeric(selected_data[[ghg]])
+        fit_out       <- .fit_ghg_model(conc_vec, elapsed_s, fit_type, t_zero, kappamax,
+                                        instrument_precision)
+        best_r_square <- fit_out$r_square
+        best_slope    <- fit_out$slope
+        best_b_param  <- fit_out$b_param
+        best_fit_used <- fit_out$fit_used
+        best_cor      <- if (!is.na(fit_out$r_square)) stats::cor(conc_vec, elapsed_s) else NA_real_
+        best_start_dt <- selected_data$real_datetime[1]
+        best_end_dt   <- selected_data$real_datetime[nrow(selected_data)]
+      }
+    } else {
+      if (nrow(sorted_data) >= num_rows) {
+        for (j in 1:(nrow(sorted_data) - num_rows + 1)) {
+          selected_data <- sorted_data[j:(j + num_rows - 1), ]
 
-      # Calculate R-squared value from the regression summary
-      r_square <- summary(regression)$r.squared
+          elapsed_s <- as.numeric(difftime(selected_data$real_datetime,
+                                           selected_data$real_datetime[1],
+                                           units = "secs"))
+          conc_vec <- as.numeric(selected_data[[ghg]])
 
-      # Update best results if the current R-squared is better
-      if (r_square > best_r_square) {
-        best_r_square <- r_square
-        best_slope <- stats::coef(regression)[2]  # Get the slope from the regression coefficients
-        best_start_time <- selected_data$real_datetime[1]  # Record the start time of the best fit
-        best_end_time <- selected_data$real_datetime[length(selected_data$real_datetime)]  # Record the end time of the best fit
-        cor_site     <- reference_site[i]
-        cor_analyzer <- reference_analyzer[i]
+          fit_out  <- .fit_ghg_model(conc_vec, elapsed_s, fit_type, t_zero, kappamax,
+                                     instrument_precision)
+          r_square <- fit_out$r_square
+
+          if (!is.na(r_square) && r_square > best_r_square) {
+            best_r_square <- r_square
+            best_slope    <- fit_out$slope
+            best_b_param  <- fit_out$b_param
+            best_fit_used <- fit_out$fit_used
+            best_cor      <- stats::cor(conc_vec, elapsed_s)
+            best_start_dt <- selected_data$real_datetime[1]
+            best_end_dt   <- selected_data$real_datetime[nrow(selected_data)]
+          }
+        }
       }
     }
 
-    # Return the best results for this reference time
+    # Quality flag: correlation threshold distinguishes "zero" (no trend) from "discard" (poor fit)
+    flag <- if (is.na(best_cor) || is.infinite(best_r_square)) {
+      "no_data"
+    } else if (abs(best_cor) < cor_threshold) {
+      "zero"
+    } else if (best_r_square >= r2_threshold) {
+      "ok"
+    } else {
+      "discard"
+    }
+
+    # Minimum detectable slope check: override "ok" if slope is within instrument noise
+    if (!is.null(instrument_precision) && flag == "ok" && !is.na(best_slope)) {
+      duration_s <- as.numeric(difftime(best_end_dt, best_start_dt, units = "secs"))
+      if (duration_s > 0 && abs(best_slope) < instrument_precision / duration_s) {
+        flag <- "zero"
+      }
+    }
+
     tibble(
-      start_time = format(best_start_time, "%Y/%m/%d %H:%M:%S"),
-      end_time = format(best_end_time, "%Y/%m/%d %H:%M:%S"),
-      slope = best_slope,
-      r_square = best_r_square,
+      start_time     = format(best_start_dt, "%Y/%m/%d %H:%M:%S"),
+      end_time       = format(best_end_dt, "%Y/%m/%d %H:%M:%S"),
+      slope          = best_slope,
+      r_square       = best_r_square,
+      correlation    = best_cor,
+      b_param        = best_b_param,
+      fit_used       = best_fit_used,
+      flag           = flag,
       reference_time = reference_time_vec[i],
-      site = cor_site,
-      analyzer = cor_analyzer
+      site           = reference_site[i],
+      analyzer       = reference_analyzer[i]
     )
   })
 
-  # Filter results to the requested analyzer
   results <- results[stringr::str_detect(results$analyzer, analyzer_code), ]
-
-  # Return the results tibble containing regression analysis results
   return(results)
 
+}
+
+#' @title plot_ghg_flux
+#' @description Plot GHG concentration over time for each measurement window, overlaid with the
+#'   fitted regression line and colored by quality flag. Use this for visual QC of
+#'   \code{\link{calculate_regression}} output.
+#' @param data Analyzer data processed by \code{tidy_ghg_analyzer()} and \code{convert_time()}.
+#' @param regression_result Output tibble from \code{calculate_regression()}.
+#' @param ghg Column name in \code{data} for the gas concentration (e.g. \code{"CH4"}, \code{"N2O"}).
+#' @param fit_type Model used to draw the fitted line. Should match the \code{fit_type} used in
+#'   \code{calculate_regression()}. One of \code{"linear"} (default), \code{"exp_tz"},
+#'   \code{"exp_zhao18"}.
+#' @param t_zero Reference time in seconds for \code{"exp_tz"} slope. Default 0.
+#' @param flag_colors Named character vector mapping flag values to colors.
+#' @return A \code{ggplot} object with one facet per site. Each panel shows raw concentration
+#'   points and the fitted line, with strip text showing slope, R², and flag.
+#' @examples
+#' data(n2o)
+#' n2o_converted <- convert_time(n2o)
+#' ref <- data.frame(
+#'   date_time = n2o_converted$real_datetime[1],
+#'   site = "S1", analyzer = "1074"
+#' )
+#' result <- calculate_regression(n2o_converted, ref, "N2O",
+#'                                reference_time = "date_time", site = "site",
+#'                                analyzer_code = "1074")
+#' plot_ghg_flux(n2o_converted, result, "N2O")
+#' @importFrom ggplot2 ggplot aes geom_point geom_line scale_color_manual facet_wrap labs
+#'   theme_bw theme element_text
+#' @importFrom dplyr mutate left_join
+#' @export
+
+plot_ghg_flux <- function(data, regression_result, ghg,
+                          fit_type = "linear", t_zero = 0,
+                          flag_colors = c(ok      = "#2ca25f",
+                                          discard = "#fc8d59",
+                                          zero    = "#74c7ef",
+                                          no_data = "#aaaaaa")) {
+
+  fit_type <- match.arg(fit_type, c("linear", "quadratic", "exp_tz", "exp_zhao18"))
+
+  if (!"real_datetime" %in% colnames(data) && "date_time" %in% colnames(data)) {
+    data$real_datetime <- data$date_time
+  } else {
+    data$real_datetime <- lubridate::force_tz(data$real_datetime, tzone = "Asia/Taipei")
+  }
+
+  # Build per-measurement window and fitted-line data
+  window_list <- vector("list", nrow(regression_result))
+  fitted_list <- vector("list", nrow(regression_result))
+
+  for (i in seq_len(nrow(regression_result))) {
+    row  <- regression_result[i, ]
+    site <- row$site
+    flag <- row$flag
+    st   <- as.POSIXct(row$start_time, format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
+    et   <- as.POSIXct(row$end_time,   format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
+
+    slope_label <- if (!is.na(row$slope))    formatC(row$slope,    digits = 5, format = "g") else "NA"
+    r2_label    <- if (!is.na(row$r_square)) round(row$r_square, 3)                          else "NA"
+    site_label  <- paste0(site, "\nslope=", slope_label, "  R²=", r2_label, "  [", flag, "]")
+
+    empty_win <- data.frame(site_label = character(0), elapsed_s = numeric(0),
+                            conc = numeric(0), flag = character(0),
+                            stringsAsFactors = FALSE)
+    empty_fit <- data.frame(site_label = character(0), elapsed_s = numeric(0),
+                            fitted = numeric(0), flag = character(0),
+                            stringsAsFactors = FALSE)
+
+    if (is.na(st) || is.na(et)) {
+      window_list[[i]] <- empty_win
+      fitted_list[[i]] <- empty_fit
+      next
+    }
+
+    win <- data[data$real_datetime >= st & data$real_datetime <= et, ]
+    win <- win[order(win$real_datetime), ]
+
+    if (nrow(win) < 2) {
+      window_list[[i]] <- empty_win
+      fitted_list[[i]] <- empty_fit
+      next
+    }
+
+    elapsed_s <- as.numeric(difftime(win$real_datetime, win$real_datetime[1], units = "secs"))
+    conc_vec  <- as.numeric(win[[ghg]])
+
+    window_list[[i]] <- data.frame(site_label = site_label, elapsed_s = elapsed_s,
+                                   conc = conc_vec, flag = flag,
+                                   stringsAsFactors = FALSE)
+
+    # Fitted line over 200 evenly spaced points
+    elapsed_seq <- seq(min(elapsed_s), max(elapsed_s), length.out = 200)
+    C0          <- conc_vec[1]
+    Cm_start    <- conc_vec[length(conc_vec)]
+
+    if (fit_type == "linear") {
+      fit    <- stats::lm(conc_vec ~ elapsed_s)
+      fitted <- stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq))
+    } else if (fit_type == "quadratic") {
+      fit    <- stats::lm(conc_vec ~ elapsed_s + I(elapsed_s^2))
+      fitted <- stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq))
+    } else if (fit_type == "exp_tz") {
+      fit <- tryCatch(
+        stats::nls(conc_vec ~ Cm + a * elapsed_s + (C0 - Cm) * exp(-b * elapsed_s),
+                   start   = list(Cm = Cm_start, a = 0, b = 0.001),
+                   control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
+        error = function(e) NULL)
+      fitted <- if (!is.null(fit))
+        tryCatch(stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq)),
+                 error = function(e) rep(NA_real_, 200))
+      else rep(NA_real_, 200)
+    } else {
+      fit <- tryCatch(
+        stats::nls(conc_vec ~ Cm + a * (elapsed_s - t0) + (C0 - Cm) * exp(-b * (elapsed_s - t0)),
+                   start   = list(Cm = Cm_start, a = 0, b = 0.001, t0 = 0),
+                   control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
+        error = function(e) NULL)
+      fitted <- if (!is.null(fit))
+        tryCatch(stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq)),
+                 error = function(e) rep(NA_real_, 200))
+      else rep(NA_real_, 200)
+    }
+
+    fitted_list[[i]] <- data.frame(site_label = site_label, elapsed_s = elapsed_seq,
+                                   fitted = fitted, flag = flag,
+                                   stringsAsFactors = FALSE)
+  }
+
+  all_windows <- do.call(rbind, window_list)
+  all_fitted  <- do.call(rbind, fitted_list)
+
+  if (nrow(all_windows) == 0) return(NULL)
+
+  # Preserve site_label order as it appears in regression_result
+  site_label_order <- vapply(seq_len(nrow(regression_result)), function(i) {
+    row        <- regression_result[i, ]
+    site       <- row$site
+    flag       <- row$flag
+    slope_lbl  <- if (!is.na(row$slope))    formatC(row$slope,    digits = 5, format = "g") else "NA"
+    r2_lbl     <- if (!is.na(row$r_square)) round(row$r_square, 3)                          else "NA"
+    paste0(site, "\nslope=", slope_lbl, "  R²=", r2_lbl, "  [", flag, "]")
+  }, character(1))
+
+  all_windows$site_label <- factor(all_windows$site_label, levels = unique(site_label_order))
+  all_fitted$site_label  <- factor(all_fitted$site_label,  levels = unique(site_label_order))
+
+  used_colors <- flag_colors[names(flag_colors) %in% unique(c(all_windows$flag, all_fitted$flag))]
+
+  ggplot2::ggplot() +
+    ggplot2::geom_point(data  = all_windows,
+                        ggplot2::aes(x = elapsed_s, y = conc,   color = flag),
+                        size  = 0.6, alpha = 0.5) +
+    ggplot2::geom_line(data   = all_fitted,
+                       ggplot2::aes(x = elapsed_s, y = fitted,  color = flag),
+                       linewidth = 0.9) +
+    ggplot2::scale_color_manual(values = used_colors) +
+    ggplot2::facet_wrap(~ site_label, scales = "free_y") +
+    ggplot2::labs(x = "Elapsed time (s)", y = paste0(ghg, " (ppm)"), color = "Flag") +
+    ggplot2::theme_bw() +
+    ggplot2::theme(strip.text      = ggplot2::element_text(size = 7.5),
+                   legend.position = "bottom")
 }
 
 #' @title calculate_ghg_flux
@@ -236,8 +607,8 @@ calculate_regression <- function(data, reference_df, ghg,
 calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "volume", temp = "temp") {
 
   # Constants
-  s_to_day <- (1/3600)  # seconds to days
-  gas_constant <- 0.082  # gas constant
+  s_to_hr <- (1/3600)  # seconds to hours (3600 s h⁻¹)
+  gas_constant <- 0.082057  # gas constant (L·atm·K⁻¹·mol⁻¹)
   celsius_to_kelvin <- 273.15  # Celsius to Kelvin conversion
   micro_to_milli <- 0.001  # micromoles to millimoles conversion
 
@@ -254,11 +625,11 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   temp <- data[[temp]]
 
   # Calculate flux
-  data$flux <- (slope * volume * (1/s_to_day) * micro_to_milli) /
+  data$flux <- (slope * volume * (1/s_to_hr) * micro_to_milli) /
     (gas_constant * (temp + celsius_to_kelvin) * area)
 
   # Set unit of the result
-  data$unit <- "mmol m-2 d-1"
+  data$unit <- "mmol m-2 h-1"
 
   return(data)
 }

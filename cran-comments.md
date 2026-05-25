@@ -1,6 +1,15 @@
-## Resubmission — v1.1.3
+## Resubmission — v1.1.3 (2nd attempt)
 
-This submission adds `sig_labels()` and fixes a bug in `ks_test()`.
+This fixes the example error flagged in the CRAN incoming pre-test.
+
+### Fix for example error
+
+`calculate_regression()` example previously hardcoded the reference datetime as
+`as.POSIXct("2023-05-04 09:16:15", tz = "Asia/Taipei")`. On CRAN's Debian/Windows
+servers (local timezone UTC), the `n2o` dataset's `date_time` column (stored with
+`tzone = ""`) was parsed 8 hours off by `lubridate::ymd_hms()`, so the time-window
+filter returned 0 rows and `lm()` received all-NA input. The reference time is now
+derived from `n2o_converted$real_datetime[1]`, making the example timezone-independent.
 
 ### Changes since v1.1.2
 

@@ -4,7 +4,15 @@
 \alias{tidy_ghg_analyzer}
 \title{tidy_ghg_analyzer}
 \usage{
-tidy_ghg_analyzer(file_path, gas, analyzer = "licor")
+tidy_ghg_analyzer(
+  file_path,
+  gas,
+  analyzer = "licor",
+  day = 0,
+  hr = 0,
+  min = 0,
+  sec = 0
+)
 }
 \arguments{
 \item{file_path}{Directory of file.}
@@ -12,14 +20,24 @@ tidy_ghg_analyzer(file_path, gas, analyzer = "licor")
 \item{gas}{Choose between CO2/CH4 or N2O LI-COR Trace Gas Analyzer, which is "ch4" and "n2o", respectively.}
 
 \item{analyzer}{The brand of the analyzer which the data was downloaded from.}
+
+\item{day}{Day offset to correct the analyzer timestamp.}
+
+\item{hr}{Hour offset to correct the analyzer timestamp.}
+
+\item{min}{Minute offset to correct the analyzer timestamp.}
+
+\item{sec}{Second offset to correct the analyzer timestamp.}
 }
 \value{
-Return the loaded XLSX file after tidying for further analysis.
+Return the loaded XLSX file after tidying. If any time offset is non-zero, a
+  \code{real_datetime} column is added via \code{\link{convert_time}}.
 }
 \description{
-Tidy the data downloaded from GHG Analyzer.
+Tidy the data downloaded from GHG Analyzer, with optional timestamp correction.
 }
 \examples{
 ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab")
 tidy_ghg_analyzer(ghg_data_path, "ch4")
+tidy_ghg_analyzer(ghg_data_path, "ch4", sec = -30)
 }
