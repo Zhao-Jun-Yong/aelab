@@ -118,7 +118,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 
 # Internal helper: fit a GHG concentration curve and return slope, R², curvature b, and fit_used.
 # kappamax:            if provided and b > kappamax, exponential fits fall back to linear.
-# instrument_precision: only used when fit_type = "auto" to compute kappamax per window.
+# instrument_precision: only used when fit_type = "auto" to compute kappamax per window
+#                       using the Hüppi et al. (2018) formula: kmax = |slope_lm| / precision.
 .fit_ghg_model <- function(conc, elapsed_s, fit_type, t_zero,
                            kappamax = NULL, instrument_precision = NULL) {
   C0     <- conc[1]
@@ -200,15 +201,17 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   }
 
   if (fit_type == "auto") {
-    # Compute kappamax from instrument precision and initial concentration
     duration_s <- max(elapsed_s) - min(elapsed_s)
-    kmax <- if (!is.null(instrument_precision) && C0 > 0 && duration_s > 0)
-      instrument_precision / (C0 * duration_s)
-    else
-      1.5 / max(duration_s, 1)
 
     # Step 1: linear (baseline)
     best <- .lm_result()
+
+    # kappamax (Hüppi et al. 2018): reject exp_tz if b > |slope_lm| / precision.
+    # Strong fluxes tolerate more curvature; near-detection-limit measurements stay linear.
+    kmax <- if (!is.null(instrument_precision) && !is.na(best$slope) && abs(best$slope) > 0)
+      abs(best$slope) / instrument_precision
+    else
+      1.5 / max(duration_s, 1)
 
     # Step 2: quadratic — accept if meaningfully better (ΔR² > 0.01)
     quad <- .quad_result()
@@ -265,9 +268,12 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' @param r2_threshold Minimum R-squared for a measurement to pass quality check. Default 0.8.
 #' @param cor_threshold Minimum absolute Pearson correlation between concentration and elapsed time.
 #'   Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.
-#' @param instrument_precision Optional. Analyser precision in ppm. When provided, measurements
-#'   whose absolute slope falls below \code{instrument_precision / window_duration_s} are flagged
-#'   \code{"zero"} even if R² and correlation pass.
+#' @param instrument_precision Optional. Analyser precision in ppm. Used in two ways:
+#'   (1) minimum-detectable-slope check — measurements whose absolute slope falls below
+#'   \code{instrument_precision / window_duration_s} are flagged \code{"zero"} even if R²
+#'   and correlation pass; (2) kappamax for \code{fit_type = "auto"} — following Hüppi et al.
+#'   (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
+#'   fluxes permit more curvature and near-detection-limit measurements are kept linear.
 #' @param kappamax Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
 #'   Only applies when \code{fit_type} is \code{"exp_tz"} or \code{"exp_zhao18"}. When \eqn{b > \kappa_{max}},
 #'   the fit implies an implausibly fast equilibration and the slope is replaced by the linear
