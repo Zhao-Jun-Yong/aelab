@@ -346,3 +346,51 @@ test_that("g_factor_threshold overrides ok to discard when ratio exceeds limit",
   expect_equal(result_triggered$flag, "discard")    # g_factor ~0.32, threshold 0.2 triggers
   expect_equal(result_not_triggered$flag, "ok")     # g_factor ~0.32, threshold 0.5 does not
 })
+
+test_that("per-row duration_minutes overrides global parameter", {
+  elapsed <- seq(0, 599)
+  data <- data.frame(
+    real_datetime = seq.POSIXt(from = as.POSIXct("2024-01-01 10:00:00"),
+                               by = "sec", length.out = 600),
+    CH4 = 2 + 0.01 * elapsed
+  )
+  ref <- data.frame(
+    date_time  = as.POSIXct("2024-01-01 10:00:00", tz = "Asia/Taipei"),
+    site       = "S1",
+    analyzer   = "TEST",
+    duration_minutes = 1   # override: use 1 min, not the global 7
+  )
+  # With per-row duration=1 and start_offset_s=0: window is 0-60s
+  result <- calculate_regression(data, ref, "CH4",
+                                 reference_time = "date_time",
+                                 site = "site", analyzer_code = "TEST",
+                                 fit_type = "linear", window_type = "fixed",
+                                 duration_minutes = 7)
+  expect_equal(result$flag, "ok")
+  expect_true(!is.na(result$end_time))
+  # Window should end at 10:01:00, not 10:07:00
+  expect_true(grepl("10:01:00", result$end_time))
+})
+
+test_that("per-row start_offset_s overrides global parameter", {
+  elapsed <- seq(0, 599)
+  data <- data.frame(
+    real_datetime = seq.POSIXt(from = as.POSIXct("2024-01-01 10:00:00"),
+                               by = "sec", length.out = 600),
+    CH4 = 2 + 0.01 * elapsed
+  )
+  ref <- data.frame(
+    date_time    = as.POSIXct("2024-01-01 10:00:00", tz = "Asia/Taipei"),
+    site         = "S1",
+    analyzer     = "TEST",
+    start_offset_s = 60   # override: start at 60s, not global 0
+  )
+  result <- calculate_regression(data, ref, "CH4",
+                                 reference_time = "date_time",
+                                 site = "site", analyzer_code = "TEST",
+                                 fit_type = "linear", window_type = "fixed",
+                                 duration_minutes = 1, start_offset_s = 0)
+  expect_equal(result$flag, "ok")
+  # Window should start at 10:01:00, not 10:00:00
+  expect_true(grepl("10:01:00", result$start_time))
+})

@@ -249,6 +249,9 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' @param site Column name in \code{reference_df} containing site identifiers.
 #' @param analyzer_code String pattern used to filter results by the \code{analyzer} column of \code{reference_df}.
 #' @param duration_minutes The duration of the measurement window in minutes. Default 7.
+#'   When \code{window_type = "fixed"} and \code{reference_df} contains a \code{duration_minutes}
+#'   column, the per-row value (if not \code{NA}) overrides this global parameter for that
+#'   specific measurement. This allows different window lengths for individual chamber closures.
 #' @param num_rows The number of rows used per sliding regression window. Only used when
 #'   \code{window_type = "sliding"}. Default 300.
 #' @param fit_type Model used to fit the concentration curve. One of \code{"linear"} (default),
@@ -267,6 +270,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   Use \code{"fixed"} to ensure all gases are regressed over the same time window.
 #' @param start_offset_s Seconds to skip from the reference time before the regression window starts.
 #'   Only used when \code{window_type = "fixed"}. Default 0.
+#'   When \code{reference_df} contains a \code{start_offset_s} column, the per-row value (if not
+#'   \code{NA}) overrides this global parameter for that specific measurement.
 #' @param r2_threshold Minimum R-squared for a measurement to pass quality check. Default 0.8.
 #' @param cor_threshold Minimum absolute Pearson correlation between concentration and elapsed time.
 #'   Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.
@@ -321,15 +326,32 @@ calculate_regression <- function(data, reference_df, ghg,
   fit_type    <- match.arg(fit_type,    c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
   window_type <- match.arg(window_type, c("sliding", "fixed"))
 
-  # For fit_type = "auto", resolve instrument_precision from the built-in table if not supplied
+  # For fit_type = "auto", resolve instrument_precision from the built-in table if not supplied.
+  # Try to match by model name appearing in analyzer_code (case-insensitive); fall back to first row for the gas.
   if (fit_type == "auto" && is.null(instrument_precision)) {
-    prec_row <- analyzer_precision[analyzer_precision$gas == toupper(ghg), ]
-    if (nrow(prec_row) > 0) instrument_precision <- prec_row$precision_ppm[1]
+    for_gas <- analyzer_precision[analyzer_precision$gas == toupper(ghg), ]
+    if (nrow(for_gas) > 0) {
+      hits <- which(vapply(for_gas$model, function(m)
+        grepl(m, analyzer_code, ignore.case = TRUE) ||
+        grepl(analyzer_code, m, ignore.case = TRUE), logical(1)))
+      prec_row <- if (length(hits) > 0) for_gas[hits[1], ] else for_gas[1, ]
+      instrument_precision <- prec_row$precision_ppm[1]
+    }
   }
 
   reference_time_vec <- lubridate::force_tz(reference_df[[reference_time]], tzone = "Asia/Taipei")
   reference_site     <- as.character(reference_df[[site]])
   reference_analyzer <- as.character(reference_df$analyzer)
+  duration_minutes_vec <- if ("duration_minutes" %in% names(reference_df)) {
+    as.numeric(reference_df$duration_minutes)
+  } else {
+    rep(NA_real_, nrow(reference_df))
+  }
+  start_offset_s_vec <- if ("start_offset_s" %in% names(reference_df)) {
+    as.numeric(reference_df$start_offset_s)
+  } else {
+    rep(NA_real_, nrow(reference_df))
+  }
 
   if (!"real_datetime" %in% colnames(data) && "date_time" %in% colnames(data)) {
     data$real_datetime <- data$date_time
@@ -339,11 +361,15 @@ calculate_regression <- function(data, reference_df, ghg,
 
   results <- purrr::map_dfr(seq_along(reference_time_vec), function(i) {
     reference_datetime <- reference_time_vec[i]
+    dur_min_i     <- if (!is.na(duration_minutes_vec[i])) duration_minutes_vec[i] else duration_minutes
+    start_off_i   <- if (!is.na(start_offset_s_vec[i])) start_offset_s_vec[i] else start_offset_s
 
     start_time <- reference_datetime
-    end_time   <- reference_datetime + as.numeric(duration_minutes) * 60
+    end_time   <- reference_datetime + start_off_i + as.numeric(dur_min_i) * 60
 
-    filtered_data <- data[data$real_datetime >= start_time & data$real_datetime <= end_time, ]
+    valid_rows    <- !is.na(data$real_datetime) & !is.na(data[[ghg]])
+    filtered_data <- data[valid_rows & data$real_datetime >= start_time &
+                            data$real_datetime <= end_time, ]
     sorted_data   <- filtered_data[order(filtered_data$real_datetime), ]
 
     best_r_square  <- -Inf
@@ -356,8 +382,8 @@ calculate_regression <- function(data, reference_df, ghg,
     best_end_dt    <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
 
     if (window_type == "fixed") {
-      win_start     <- reference_datetime + start_offset_s
-      win_end       <- win_start + as.numeric(duration_minutes) * 60
+      win_start     <- reference_datetime + start_off_i
+      win_end       <- win_start + as.numeric(dur_min_i) * 60
       selected_data <- sorted_data[sorted_data$real_datetime >= win_start &
                                    sorted_data$real_datetime <= win_end, ]
 
@@ -453,9 +479,131 @@ calculate_regression <- function(data, reference_df, ghg,
     )
   })
 
-  results <- results[stringr::str_detect(results$analyzer, analyzer_code), ]
+  results <- results[stringr::str_detect(tolower(results$analyzer), tolower(analyzer_code)), ]
   return(results)
 
+}
+
+#' @title make_reference
+#' @description Build a \code{reference_df} for \code{\link{calculate_regression}} from a
+#'   compact inline string of field notes. Each line is one closure measurement with
+#'   whitespace-separated columns (any number of spaces or tabs):
+#'   \code{time  site  analyzer  [dur=N]  [off=N]}.
+#'
+#'   The first three columns are positional (required). Optional per-row window overrides
+#'   use \code{key=value} syntax in any order: \code{dur=} sets \code{duration_minutes},
+#'   \code{off=} sets \code{start_offset_s}. Rows without an override simply omit the token —
+#'   no \code{NA} placeholder needed.
+#' @param date Sampling date applied to all rows. A single \code{"YYYY-MM-DD"} string or
+#'   \code{Date}. For multi-day campaigns, supply a character/Date vector with one value per row.
+#' @param measurements A multiline character string, one row per closure:
+#'   \code{time  site  analyzer  [dur=N]  [off=N]}.
+#'   \code{time} accepts \code{"HH:MM"} or \code{"HH:MM:SS"}.
+#' @param output Optional path for the output \code{.xlsx} file. If \code{NULL} (default),
+#'   the tibble is returned.
+#' @param tz Timezone for \code{date_time}. Default \code{"Asia/Taipei"}.
+#' @return A tibble with columns \code{site}, \code{date_time}, \code{analyzer}, and
+#'   optionally \code{duration_minutes} and/or \code{start_offset_s} (only present when at
+#'   least one row specifies the override). When \code{output} is given, the tibble is written
+#'   to Excel and returned invisibly.
+#' @examples
+#' make_reference(
+#'   date = "2026-05-22",
+#'   measurements = "
+#'     10:30:15  JN1-1  1337_1074
+#'     10:42:00  JN1-2  1337_1074
+#'     10:54:30  JN2-1  1337_1074
+#'   "
+#' )
+#'
+#' # per-row window overrides — no NA placeholders needed
+#' make_reference(
+#'   date = "2026-05-22",
+#'   measurements = "
+#'     10:30:15  TT3-1  1450  dur=3.5
+#'     10:42:00  TT3-2  1450  dur=2.0
+#'     10:54:30  TT3-3  1450  off=45
+#'     11:10:00  TT1-1  1450
+#'   "
+#' )
+#' @importFrom lubridate ymd_hms
+#' @importFrom tibble tibble
+#' @importFrom openxlsx write.xlsx
+#' @export
+make_reference <- function(date,
+                           measurements,
+                           output = NULL,
+                           tz     = "Asia/Taipei") {
+
+  # --- parse measurements string ---
+  lines <- unlist(strsplit(measurements, "\n"))
+  lines <- trimws(lines)
+  lines <- lines[nchar(lines) > 0]
+  if (length(lines) == 0) stop("'measurements' contains no data rows.")
+
+  parsed <- lapply(lines, function(line) {
+    parts <- strsplit(line, "\\s+")[[1]]
+    parts <- parts[nchar(parts) > 0]
+    if (length(parts) < 3)
+      stop("Each line needs: time  site  analyzer\n  Got: '", line, "'")
+
+    # first three tokens are positional
+    row <- list(time = parts[1], site = parts[2], analyzer = parts[3],
+                duration_minutes = NA_character_, start_offset_s = NA_character_)
+
+    # remaining tokens: key=value (dur= / off=) or positional (4th=dur, 5th=off)
+    if (length(parts) > 3) {
+      rest <- parts[-(1:3)]
+      for (tok in rest) {
+        if (grepl("^dur=", tok, ignore.case = TRUE)) {
+          row$duration_minutes <- sub("^[Dd][Uu][Rr]=", "", tok)
+        } else if (grepl("^off=", tok, ignore.case = TRUE)) {
+          row$start_offset_s <- sub("^[Oo][Ff][Ff]=", "", tok)
+        } else if (is.na(row$duration_minutes)) {
+          row$duration_minutes <- tok          # 4th positional token
+        } else {
+          row$start_offset_s <- tok            # 5th positional token
+        }
+      }
+    }
+    row
+  })
+
+  n       <- length(parsed)
+  has_dur <- any(vapply(parsed, function(r) !is.na(r$duration_minutes), logical(1)))
+  has_off <- any(vapply(parsed, function(r) !is.na(r$start_offset_s),   logical(1)))
+
+  # --- date ---
+  d_str <- format(as.Date(as.character(rep_len(date, n))), "%Y-%m-%d")
+
+  # --- time ---
+  t_str <- vapply(parsed, `[[`, character(1), "time")
+  t_str <- sub("^(\\d):", "0\\1:", t_str)
+  t_str <- ifelse(nchar(t_str) == 5, paste0(t_str, ":00"), t_str)
+
+  dt <- lubridate::ymd_hms(paste(d_str, t_str), tz = tz)
+
+  ref <- tibble::tibble(
+    site      = vapply(parsed, `[[`, character(1), "site"),
+    date_time = dt,
+    analyzer  = vapply(parsed, `[[`, character(1), "analyzer")
+  )
+
+  if (has_dur) {
+    raw <- vapply(parsed, function(r) if (is.na(r$duration_minutes)) NA_character_ else r$duration_minutes, character(1))
+    ref$duration_minutes <- suppressWarnings(as.numeric(raw))
+  }
+  if (has_off) {
+    raw <- vapply(parsed, function(r) if (is.na(r$start_offset_s)) NA_character_ else r$start_offset_s, character(1))
+    ref$start_offset_s <- suppressWarnings(as.numeric(raw))
+  }
+
+  if (!is.null(output)) {
+    openxlsx::write.xlsx(as.data.frame(ref), output)
+    invisible(ref)
+  } else {
+    ref
+  }
 }
 
 #' @title plot_ghg_flux

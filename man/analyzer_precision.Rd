@@ -2,17 +2,17 @@
 % Please edit documentation in R/analyzer_precision.R
 \name{analyzer_precision}
 \alias{analyzer_precision}
-\title{Instrument precision for LI-COR trace gas analyzers}
+\title{Instrument precision for supported trace gas analyzers}
 \format{
-A data frame with 3 rows and 3 variables:
+A data frame with 5 rows and 3 variables:
 \describe{
   \item{model}{Analyzer model name (character).}
   \item{gas}{Gas measured: \code{"CH4"}, \code{"CO2"}, or \code{"N2O"} (character).}
-  \item{precision_ppm}{Instrument precision in ppm (1σ, 1 s), from LI-COR product specifications (numeric).}
+  \item{precision_ppm}{Instrument precision in ppm (1σ, 1 s) (numeric).}
 }
 }
 \source{
-LI-COR Biosciences product specifications.
+LI-COR Biosciences product specifications; LGR (Los Gatos Research) UGGA product specifications.
 }
 \description{
 A lookup table of 1-second (1σ) precision values used to compute

@@ -37,7 +37,10 @@ calculate_regression(
 
 \item{analyzer_code}{String pattern used to filter results by the \code{analyzer} column of \code{reference_df}.}
 
-\item{duration_minutes}{The duration of the measurement window in minutes. Default 7.}
+\item{duration_minutes}{The duration of the measurement window in minutes. Default 7.
+When \code{window_type = "fixed"} and \code{reference_df} contains a \code{duration_minutes}
+column, the per-row value (if not \code{NA}) overrides this global parameter for that
+specific measurement. This allows different window lengths for individual chamber closures.}
 
 \item{num_rows}{The number of rows used per sliding regression window. Only used when
 \code{window_type = "sliding"}. Default 300.}
@@ -60,7 +63,9 @@ the best R² within the measurement period. \code{"fixed"} fits a single window 
 Use \code{"fixed"} to ensure all gases are regressed over the same time window.}
 
 \item{start_offset_s}{Seconds to skip from the reference time before the regression window starts.
-Only used when \code{window_type = "fixed"}. Default 0.}
+Only used when \code{window_type = "fixed"}. Default 0.
+When \code{reference_df} contains a \code{start_offset_s} column, the per-row value (if not
+\code{NA}) overrides this global parameter for that specific measurement.}
 
 \item{r2_threshold}{Minimum R-squared for a measurement to pass quality check. Default 0.8.}
 

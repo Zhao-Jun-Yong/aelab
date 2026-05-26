@@ -1,3 +1,39 @@
+# aelab 1.1.5
+
+## New functions
+
+* `make_reference()` — builds a `reference_df` for `calculate_regression()` from a field-notes
+  data frame. Combines separate `date` and `time` columns (or a pre-combined `datetime` column)
+  into the `date_time` POSIXct column required by `calculate_regression()`. Accepts any column
+  names via arguments. Optionally writes the result to `.xlsx` via `file_path`. Supports
+  per-row `duration_minutes` and `start_offset_s` overrides.
+
+## Modified functions
+
+* `calculate_regression()` — fixed a case-sensitivity bug where `analyzer_code` was matched
+  against `results$analyzer` with a case-sensitive `str_detect`, causing all results to be
+  dropped when the two differed in case (e.g., `analyzer_code = "LGR"` vs reference entry
+  `"lgr"`). Match is now case-insensitive. The `fit_type = "auto"` precision lookup now
+  matches the analyzer model name against `analyzer_code` (case-insensitive substring) before
+  falling back to the first row for the gas, so LGR data correctly uses LGR UGGA precision
+  rather than LI-7810 precision.
+
+## Data
+
+* `analyzer_precision` — added LGR UGGA entries: CH4 0.002 ppm and CO2 1.0 ppm (1σ, 1 s).
+
+# aelab 1.1.4
+
+## Modified functions
+
+* `calculate_regression()` — `reference_df` may now include optional `duration_minutes` and `start_offset_s`
+  columns (numeric). When present and non-`NA` for a row, they override the global `duration_minutes` and
+  `start_offset_s` parameters for that specific measurement. This allows per-measurement window control
+  when individual closures have early saturation or artifact periods. Fixed a pre-existing minor issue where
+  the data-load window was up to `start_offset_s` seconds shorter than the regression window. Rows with
+  `NA` timestamps or `NA` concentration values are now excluded before regression (previously they could
+  propagate through and cause spurious `"no_data"` flags).
+
 # aelab 1.1.3
 
 ## New functions

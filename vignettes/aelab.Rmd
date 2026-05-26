@@ -87,6 +87,10 @@ calculate_regression(ch4, ref, ghg = "CH4", reference_time = "date_time",
                      window_type = "fixed", start_offset_s = 30)
 ```
 
+### Per-row window overrides
+
+When `reference_df` contains a `duration_minutes` and/or `start_offset_s` column, a non-`NA` value in that column overrides the global parameter for that specific measurement. Rows without the column, or with `NA`, fall back to the global value. This is useful when individual closures have different deployment lengths or when one measurement needs a longer dead-bar skip.
+
 ### Model selection
 
 The `fit_type` parameter controls the regression model:
@@ -96,7 +100,7 @@ The `fit_type` parameter controls the regression model:
 - **`"exp_tz"`** / **`"exp_zhao18"`**: Hutchinson–Mosier nonlinear exponential models; slope evaluated at `t_zero`.
 - **`"auto"`**: tries linear → quadratic → exp_tz in sequence, accepting a more complex model only when R² improves by > 0.01 and the exponential curvature parameter *b* does not exceed κ~max~ (Hüppi et al. 2018). The model chosen for each measurement is recorded in the `fit_used` output column.
 
-When `fit_type = "auto"`, analyser precision is looked up automatically from the built-in `analyzer_precision` dataset (LI-7810 and LI-7820) if `instrument_precision` is not supplied.
+When `fit_type = "auto"`, analyser precision is looked up automatically from the built-in `analyzer_precision` dataset (LI-7810, LI-7820, and LGR UGGA) if `instrument_precision` is not supplied. The lookup matches the `analyzer_code` argument against model names case-insensitively, so `"LGR"` correctly resolves to LGR UGGA precision rather than falling back to LI-7810.
 
 ```{r}
 # Auto model selection with fixed window and 30-s dead-bar skip
@@ -134,6 +138,46 @@ ref_direct <- data.frame(
 )
 calculate_regression(ch4, ref_direct, ghg = "CH4", reference_time = "date_time",
                      site = "site", analyzer_code = "1337")
+```
+
+### Method 3: Using `make_reference()`
+
+`make_reference()` builds a `reference_df` from a compact multiline string — one closure per line, whitespace-separated: `time  site  analyzer  [dur=N]  [off=N]`. This avoids maintaining a separate Excel file for small campaigns or ad-hoc measurements.
+
+```{r}
+make_reference(
+  date = "2023-03-11",
+  measurements = "
+    07:32:00  S1  1337
+    07:45:00  S2  1337
+  "
+)
+```
+
+Per-row window overrides use `dur=` and `off=` tokens. Rows without an override simply omit the token.
+
+```{r}
+make_reference(
+  date = "2023-03-11",
+  measurements = "
+    07:32:00  S1  1337  dur=3.5
+    07:45:00  S2  1337  dur=2.0  off=45
+    08:00:00  S3  1337
+  "
+)
+```
+
+When `output` is specified, the tibble is also written to `.xlsx`:
+
+```{r eval=FALSE}
+make_reference(
+  date = "2023-03-11",
+  measurements = "
+    07:32:00  S1  1337
+    07:45:00  S2  1337
+  ",
+  output = "reference.xlsx"
+)
 ```
 
 ## Calculate the flux
