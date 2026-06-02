@@ -247,11 +247,11 @@ The change in oxygen concentration in the water reflects the balance between pho
 
 ## Load and process the raw data file
 
-First, we need to obtain the necessary parameters from the raw data downloaded from the data loggers. We will remove unnecessary rows and columns and extract the dissolved oxygen concentrations and water temperature, along with the corresponding date and time recorded by the logger using `process_hobo()`. This function will also eliminate any NA values in the dataframe. The `no_hobo` input was necessary for further analysis. Currently, it supports raw data downloaded from the Onset HOBO Dissolved Oxygen Data Logger (U26-001).
+First, we need to obtain the necessary parameters from the raw data downloaded from the data loggers. We will remove unnecessary rows and columns and extract the dissolved oxygen concentrations and water temperature, along with the corresponding date and time recorded by the logger using `process_hobo()`. This function will also eliminate any NA values in the dataframe. The `no_hobo` input was necessary for further analysis. `process_hobo()` supports two logger types via the `type` argument: `type = "do"` (default) for the HOBO U26 Dissolved Oxygen Data Logger, and `type = "temp"` for the HOBO Pro v2 Temperature/RH Logger (returns columns `air_temp` and `rh` instead of `do` and `temp`, with one row per reading).
 
 ```{r}
 hobo_data_path <- system.file("extdata", "ex_hobo.csv", package = "aelab")
-do <- process_hobo(hobo_data_path, no_hobo = "code_for_logger")
+do <- process_hobo(hobo_data_path, no_hobo = "code_for_logger", type = "do")
 do[c(1:3), ]
 ```
 

@@ -1,3 +1,13 @@
+# aelab 1.1.6
+
+## Modified functions
+
+* `process_hobo()` — added `type` parameter (`"do"` or `"temp"`). `type = "do"` (default)
+  retains existing behaviour for the HOBO U26 Dissolved Oxygen Data Logger. `type = "temp"`
+  adds support for the HOBO Pro v2 Temperature/RH Logger; returns columns `date_time`,
+  `air_temp`, `rh`, `no_hobo` (one row per reading, no 30-min aggregation). Both types now
+  include a year fix for Chinese locale exports that mis-parse the year as 0025.
+
 # aelab 1.1.5
 
 ## New functions

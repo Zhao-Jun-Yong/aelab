@@ -9,6 +9,26 @@ test_that("process_hobo works correctly", {
   expect_true(all(!is.na(data$temp)))
 })
 
+test_that("process_hobo works with type = 'temp' (HOBO Pro v2)", {
+  tmp <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp))
+  # Minimal HOBO Pro v2 CSV: 2 header rows + 2 data rows, Chinese AM/PM locale
+  writeLines(c(
+    '"Plot Title","HOBO Pro v2",,',
+    '"#","Date Time","Temp, °C","RH, %"',
+    paste0('"1","10/15/2025 上午10時30分00秒","28.5","75.2"'),
+    paste0('"2","10/15/2025 上午11時00分00秒","29.0","74.5"')
+  ), tmp)
+
+  data <- process_hobo(tmp, no_hobo = "test", type = "temp")
+
+  expect_identical(c("date_time", "air_temp", "rh", "no_hobo"), names(data))
+  expect_identical("test", data$no_hobo[1])
+  expect_true(is.numeric(data$air_temp))
+  expect_true(is.numeric(data$rh))
+  expect_true(inherits(data$date_time, "POSIXct"))
+})
+
 test_that("process_weather works correctly", {
 
   data <- process_weather(test_file("ex_weather.csv"), date = "2024-01-01", zone = "zone_A")

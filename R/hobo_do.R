@@ -4,112 +4,98 @@ utils::globalVariables(c(
   "cor_o2_saturation_pressure", "k", "rate_do_change", "depth_m",
   "flux", "time", "sunrise_time", "sunset_time", "site", "no_hobo",
   "nep_hr", "daylight_hr", "r_hr", "nep_daytime", "r_daytime",
-  "gpp", "r_day", "nep", "hobo", "do", "date"
+  "gpp", "r_day", "nep", "hobo", "do", "date", "air_temp", "rh"
 ))
-
 
 
 #' @title process_hobo
 #' @importFrom lubridate ceiling_date hours days force_tz
 #' @importFrom dplyr arrange
 #' @importFrom utils read.csv
-#' @importFrom stats na.omit
-#' @importFrom stats aggregate
-#' @importFrom stats time
-#' @description Tidy the data retrieved from HOBO U26 Dissolved Oxygen Data Logger.
-#' @param file_path Directory of file.
+#' @importFrom stats na.omit aggregate
+#' @description Tidy data exported from a HOBO data logger. Supports the HOBO
+#'   U26 Dissolved Oxygen Data Logger (\code{type = "do"}) and the HOBO Pro v2
+#'   Temperature/RH Logger (\code{type = "temp"}).
+#' @param file_path Path to the CSV file exported from HOBOware.
 #' @param no_hobo The code for the data logger.
-#' @return A dataframe.
+#' @param type Logger type: \code{"do"} (default) for HOBO U26 DO logger, or
+#'   \code{"temp"} for HOBO Pro v2 temperature/RH logger.
+#' @return A dataframe. For \code{type = "do"}: columns \code{date_time},
+#'   \code{do}, \code{temp}, \code{no_hobo}, aggregated to 30-minute intervals.
+#'   For \code{type = "temp"}: columns \code{date_time}, \code{air_temp},
+#'   \code{rh}, \code{no_hobo}, one row per logger reading.
 #' @examples
 #' hobo_data_path <- system.file("extdata", "ex_hobo.csv", package = "aelab")
 #' df <- process_hobo(hobo_data_path, "code_for_logger")
 #' @export
 
-process_hobo <- function(file_path, no_hobo) {
-  # Read the CSV file without headers
-  df <- utils::read.csv(file_path, header = F)
+process_hobo <- function(file_path, no_hobo, type = c("do", "temp")) {
+  type <- match.arg(type)
 
-  # Remove the first two rows and columns 5 to 9
-  df <- df[-c(1:2), -c(5:9)]
-
-  # Set column names for the dataframe
-  colnames(df) <- c("no", "date_time", "do", "temp")
-
-  # Convert to a data frame and remove rows with NA values
+  df <- utils::read.csv(file_path, header = FALSE)
+  df <- df[-c(1:2), 1:4]
+  colnames(df) <- if (type == "do") {
+    c("no", "date_time", "do", "temp")
+  } else {
+    c("no", "date_time", "air_temp", "rh")
+  }
   df <- as.data.frame(df)
   df <- stats::na.omit(df)
 
-  # Check if date_time contains "上午" (morning) or "下午" (afternoon)
-  if (any(grepl("\u4e0a\u5348|\u4e0b\u5348", df$date_time))) {
-
-    # Create a new variable to indicate morning or afternoon
-    df$new_variable <- ifelse(grepl("\u4e0a\u5348", df$date_time), "morning", "afternoon")
-
-    # Clean up the date_time string by removing unnecessary characters
-    df$date_time <- gsub("\u4e0a\u5348|\u4e0b\u5348", "", df$date_time)  # Remove "上午" and "下午"
-    df$date_time <- gsub("\u6642", ":", df$date_time)                     # Replace "時" with ":"
-    df$date_time <- gsub("\u5206", ":", df$date_time)                     # Replace "分" with ":"
-    df$date_time <- gsub("\u79d2", "", df$date_time)                      # Remove "秒"
-
-    # Convert the cleaned date_time to POSIXlt format
+  # Handle Chinese AM/PM locale export (上午 = morning, 下午 = afternoon)
+  if (any(grepl("上午|下午", df$date_time))) {
+    df$new_variable <- ifelse(grepl("上午", df$date_time), "morning", "afternoon")
+    df$date_time <- gsub("上午|下午", "", df$date_time)
+    df$date_time <- gsub("時", ":", df$date_time)
+    df$date_time <- gsub("分", ":", df$date_time)
+    df$date_time <- gsub("秒", "", df$date_time)
     df$date_time <- strptime(df$date_time, format = "%m/%d/%Y %H:%M:%S")
 
-    # Create subsets for afternoon and morning based on time conditions
     subset_afternoon <- df[df$new_variable == "afternoon" &
-                             format(df$date_time, "%H:%M:%S") >= "01:00:00" &
-                             format(df$date_time, "%H:%M:%S") <= "11:59:59", ]
+      format(df$date_time, "%H:%M:%S") >= "01:00:00" &
+      format(df$date_time, "%H:%M:%S") <= "11:59:59", ]
     subset_morning <- df[df$new_variable == "morning" &
-                           format(df$date_time, "%H:%M:%S") >= "12:00:00" &
-                           format(df$date_time, "%H:%M:%S") <= "12:59:59", ]
+      format(df$date_time, "%H:%M:%S") >= "12:00:00" &
+      format(df$date_time, "%H:%M:%S") <= "12:59:59", ]
 
-    # Adjust the date_time for afternoon and morning subsets
-    subset_afternoon$date_time <- subset_afternoon$date_time + lubridate::hours(12)  # Convert to 24-hour format
-    subset_morning$date_time <- subset_morning$date_time + lubridate::hours(12) - lubridate::days(1)  # Adjust for previous day
+    subset_afternoon$date_time <- subset_afternoon$date_time + lubridate::hours(12)
+    subset_morning$date_time <- subset_morning$date_time + lubridate::hours(12) - lubridate::days(1)
 
-    # Update the original dataframe with the adjusted subsets
     df[df$new_variable == "afternoon" &
-         format(df$date_time, "%H:%M:%S") >= "01:00:00" &
-         format(df$date_time, "%H:%M:%S") <= "11:59:59", ] <- subset_afternoon
+      format(df$date_time, "%H:%M:%S") >= "01:00:00" &
+      format(df$date_time, "%H:%M:%S") <= "11:59:59", ] <- subset_afternoon
     df[df$new_variable == "morning" &
-         format(df$date_time, "%H:%M:%S") >= "12:00:00" &
-         format(df$date_time, "%H:%M:%S") <= "12:59:59", ] <- subset_morning
+      format(df$date_time, "%H:%M:%S") >= "12:00:00" &
+      format(df$date_time, "%H:%M:%S") <= "12:59:59", ] <- subset_morning
 
-    # Clean up temporary variables
     rm(subset_afternoon, subset_morning)
-    df$new_variable <- NULL  # Remove the new_variable column
-
-  } else {
-    # No action needed if date_time does not contain morning or afternoon indicators
+    df$new_variable <- NULL
   }
 
-  # Convert 'do' and 'temp' columns to numeric
-  df$do <- as.numeric(df$do)
-  df$temp <- as.numeric(df$temp)
+  # Fix year mis-parsed as 0025 instead of 2025 in Chinese locale exports
+  df$date_time <- as.POSIXct(gsub("^0025", "2025", format(df$date_time)))
+  df$date_time <- lubridate::force_tz(df$date_time, tzone = "Asia/Taipei")
 
-  # Extract time from date_time for further analysis
-  df$time <- format(df$date_time, "%H:%M:%S")
+  if (type == "do") {
+    df$do <- as.numeric(df$do)
+    df$temp <- as.numeric(df$temp)
 
-  # Round date_time to the nearest 30 minutes
-  df$date_time <- as.factor(lubridate::ceiling_date(df$date_time, unit = "30 minutes"))
+    df$time <- format(df$date_time, "%H:%M:%S")
+    df$date_time <- as.factor(lubridate::ceiling_date(df$date_time, unit = "30 minutes"))
 
-  # Aggregate data by date_time, calculating the mean for 'do' and 'temp'
-  tidy_df <- stats::aggregate(cbind(do, temp) ~ date_time, df, function(x) mean(x, na.rm = TRUE))
+    tidy_df <- stats::aggregate(cbind(do, temp) ~ date_time, df, function(x) mean(x, na.rm = TRUE))
+    tidy_df <- dplyr::arrange(tidy_df, date_time)
 
-  # Arrange the tidy dataframe by date_time
-  tidy_df <- dplyr::arrange(tidy_df, date_time)
-
-  # Convert date_time back to character and then to POSIXct format
-  tidy_df$date_time <- as.character(tidy_df$date_time)
-  tidy_df$date_time <- as.POSIXct(tidy_df$date_time, format = "%Y-%m-%d %H:%M:%S")
-
-  # Set the timezone to Asia/Taipei
-  tidy_df$date_time <- lubridate::force_tz(tidy_df$date_time, tzone = "Asia/Taipei")
-
-  # Add the no_hobo parameter to the tidy dataframe
-  tidy_df$no_hobo <- no_hobo
-
-  # Return the cleaned and aggregated dataframe
-  return(tidy_df)
+    tidy_df$date_time <- as.POSIXct(as.character(tidy_df$date_time), format = "%Y-%m-%d %H:%M:%S")
+    tidy_df$date_time <- lubridate::force_tz(tidy_df$date_time, tzone = "Asia/Taipei")
+    tidy_df$no_hobo <- no_hobo
+    return(tidy_df)
+  } else {
+    df$air_temp <- as.numeric(df$air_temp)
+    df$rh <- as.numeric(df$rh)
+    df$no_hobo <- no_hobo
+    return(df[, c("date_time", "air_temp", "rh", "no_hobo")])
+  }
 }
 
 
@@ -122,25 +108,24 @@ process_hobo <- function(file_path, no_hobo) {
 #' @param date Date of the daily weather data in yyyy-mm-dd format.
 #' @param zone Code for the region of the weather station.
 #' @return A dataframe.
-#'@examples
+#' @examples
 #' weather_data_path <- system.file("extdata", "ex_weather.csv", package = "aelab")
 #' df <- process_weather(weather_data_path, "2024-01-01", "site_A")
 #' @export
 
 process_weather <- function(file_path, date, zone) {
-
   # This function processes a CSV file downloaded with a specific format
   # Read the CSV file into a dataframe
   df <- readr::read_csv(file_path)
 
   # Identify the columns for hours, pressure (hPa), and wind speed (m/s)
-  hours <- grep("\u89c0\u6e2c\u6642\u9593", names(df), ignore.case = F)  # "觀測時間"
-  pressure_hpa <- grep("\u6e2c\u7ad9\u6c23", names(df), ignore.case = F)  # "測站氣"
-  wind_speed <- grep("\u98a8\u901f", names(df), ignore.case = F)  # "風速"
+  hours <- grep("觀測時間", names(df), ignore.case = F) # "觀測時間"
+  pressure_hpa <- grep("測站氣", names(df), ignore.case = F) # "測站氣"
+  wind_speed <- grep("風速", names(df), ignore.case = F) # "風速"
 
   # Duplicate the dataframe and remove unnecessary rows and columns
-  df <- rbind(df, df)  # Duplicate the dataframe
-  df <- df[-c(1, 26), c(hours, pressure_hpa, wind_speed)]  # Remove the first row and the 26th row, keep relevant columns
+  df <- rbind(df, df) # Duplicate the dataframe
+  df <- df[-c(1, 26), c(hours, pressure_hpa, wind_speed)] # Remove the first row and the 26th row, keep relevant columns
 
   # Rename the columns for clarity
   colnames(df) <- c("hours", "pressure_hpa", "wind_ms")
@@ -170,7 +155,7 @@ process_weather <- function(file_path, date, zone) {
       seq(
         from = as.POSIXct("00:30:00", format = "%H:%M:%S", tz = "Asia/Taipei"),
         by = "30 min",
-        length.out = nrow(df)  # Length matches the number of rows in df
+        length.out = nrow(df) # Length matches the number of rows in df
       ),
       format = "%H:%M:%S"
     )
@@ -183,8 +168,8 @@ process_weather <- function(file_path, date, zone) {
 
     # Combine date and time into a single datetime column
     df$date_time <- as.POSIXlt(paste(date, time_sequence), format = "%Y-%m-%d %H:%M:%S", tz = "Asia/Taipei")
-    df$date_time <- as.POSIXct(df$date_time)  # Convert to POSIXct for easier manipulation
-    df$date_time <- lubridate::force_tz(df$date_time, tzone = "Asia/Taipei")  # Ensure timezone is set correctly
+    df$date_time <- as.POSIXct(df$date_time) # Convert to POSIXct for easier manipulation
+    df$date_time <- lubridate::force_tz(df$date_time, tzone = "Asia/Taipei") # Ensure timezone is set correctly
 
     # Adjust the last entry's date_time to the next day
     new_date <- lubridate::as_datetime(df$date_time[48])
@@ -194,7 +179,7 @@ process_weather <- function(file_path, date, zone) {
     df$date <- NULL
     df$time <- NULL
     df$hours <- NULL
-    df$zone <- zone  # Assign the zone parameter to the dataframe
+    df$zone <- zone # Assign the zone parameter to the dataframe
 
     # Convert the dataframe to a standard data frame format and return it
     return(as.data.frame(df))
@@ -218,7 +203,6 @@ process_weather <- function(file_path, date, zone) {
 #' @export
 
 process_info <- function(file_path) {
-
   # Read the Excel file into a dataframe
   info <- readxl::read_excel(file_path)
 
@@ -246,7 +230,6 @@ process_info <- function(file_path) {
 #' @export
 
 plot_hobo <- function(df) {
-
   # Create a scatter plot using ggplot2
   ggplot2::ggplot(df, aes(x = date_time, y = do)) +
     geom_point(size = 1) +
@@ -265,7 +248,6 @@ plot_hobo <- function(df) {
 #' @export
 
 calculate_do <- function(df) {
-
   # Calculate various metrics related to dissolved oxygen and ecosystem productivity
   df <- df |>
     dplyr::mutate(
@@ -284,10 +266,10 @@ calculate_do <- function(df) {
       temp_k = temp + 273.15,
 
       # Calculate the concentration of oxygen (c_o2) using the temperature and salinity
-      c_o2 = -173.4292 + 249.6336 * (100/temp_k) +
-        143.3483 * log(temp_k/100) -
-        21.8492 * (temp_k/100) +
-        salinity * (-0.033096 + 0.014259 * (temp_k/100) - 0.0017 * (temp_k/100)^2),
+      c_o2 = -173.4292 + 249.6336 * (100 / temp_k) +
+        143.3483 * log(temp_k / 100) -
+        21.8492 * (temp_k / 100) +
+        salinity * (-0.033096 + 0.014259 * (temp_k / 100) - 0.0017 * (temp_k / 100)^2),
 
       # Calculate oxygen saturation based on concentration
       o2_saturation = exp(c_o2) * 1.423,
@@ -296,7 +278,7 @@ calculate_do <- function(df) {
       cor_o2_saturation_pressure = o2_saturation * (pressure_hpa * 0.0987 - 0.0112) / 100,
 
       # Calculate the rate of change in dissolved oxygen (DO)
-      rate_do_change = (c(NA, diff(do))) * 2,  # Multiply by 2 to adjust for the time interval
+      rate_do_change = (c(NA, diff(do))) * 2, # Multiply by 2 to adjust for the time interval
 
       # Calculate Schmidt number (sc) based on temperature
       sc = 0.0476 * temp^3 + 3.7818 * temp^2 - 120.1 * temp + 1800.6,
@@ -334,12 +316,13 @@ calculate_do <- function(df) {
 
   # Calculate total respiration and gross primary production (GPP)
   tidy_do <- tidy_do |>
-    dplyr::mutate(r_daytime = r_hr * daylight_hr,
-                  r_day = r_hr * 24,  # Total respiration over 24 hours
-                  gpp = nep_daytime - r_daytime,  # Gross primary production
-                  nep = gpp + r_day  # Net ecosystem production
+    dplyr::mutate(
+      r_daytime = r_hr * daylight_hr,
+      r_day = r_hr * 24, # Total respiration over 24 hours
+      gpp = nep_daytime - r_daytime, # Gross primary production
+      nep = gpp + r_day # Net ecosystem production
     ) |>
-    dplyr::select(site, no_hobo, date, r_day, gpp, nep)  # Select relevant columns for output
+    dplyr::select(site, no_hobo, date, r_day, gpp, nep) # Select relevant columns for output
 
   # Return the tidy dataframe with calculated metrics
   return(tidy_do)
@@ -353,16 +336,16 @@ calculate_do <- function(df) {
 #' @param end_date Date of the daily weather data in yyyy-mm-dd format.
 #' @param zone Code for the region of the weather station.
 #' @return A dataframe.
-#'@examples
+#' @examples
 #' weather_data_path <- system.file("extdata", package = "aelab")
 #' modified_data_path <- paste0(weather_data_path, "/ex_")
 #' df <- combine_weather(modified_data_path,
-#' start_date = "2024-01-01",
-#' end_date = "2024-01-02", "site_A")
+#'   start_date = "2024-01-01",
+#'   end_date = "2024-01-02", "site_A"
+#' )
 #' @export
 
 combine_weather <- function(file_path, start_date, end_date, zone) {
-
   # Generate a sequence of dates from start_date to end_date
   dates <- as.character(seq(as.Date(start_date), as.Date(end_date), by = "day"))
 
@@ -399,7 +382,6 @@ combine_weather <- function(file_path, start_date, end_date, zone) {
 #' @export
 
 combine_hobo <- function(file_path, file_prefix = "no.") {
-
   # List all files in the specified directory that match the given prefix
   file_names <- list.files(file_path, pattern = paste0("^", file_prefix))
 
@@ -434,8 +416,10 @@ combine_hobo <- function(file_path, file_prefix = "no.") {
 #'   \code{daylight_hr}, \code{radiation}, \code{date}, and \code{zone}.
 #' @examples
 #' \dontrun{
-#' df <- process_weather_month("path/to/2024-01.csv", month = 1, year = 2024,
-#'                             zone = "site_A")
+#' df <- process_weather_month("path/to/2024-01.csv",
+#'   month = 1, year = 2024,
+#'   zone = "site_A"
+#' )
 #' }
 #' @importFrom readr read_csv
 #' @importFrom dplyr mutate across where
@@ -444,14 +428,14 @@ process_weather_month <- function(file_path, month, year = 2024, zone) {
   df <- readr::read_csv(file_path, show_col_types = FALSE)
 
   regex_patterns <- c(
-    day              = "^\u89c0\u6e2c\u6642\u9593",   # 觀測時間
-    pressure_hpa     = "^\u6e2c\u7ad9\u6c23\u58d3",  # 測站氣壓
-    temp             = "^\u6c23\u6eab",               # 氣溫
-    humidity_percent = "^\u76f8\u5c0d\u6fd5\u5ea6",  # 相對溼度
-    wind_ms          = "^\u98a8\u901f",               # 風速
-    rain_mm          = "^\u964d\u6c34\u91cf",         # 降水量
-    daylight_hr      = "^\u65e5\u7167\u6642\u6578",   # 日照時數
-    radiation        = "^\u5168\u5929\u7a7a\u65e5\u5c04\u91cf" # 全天空日射量
+    day              = "^觀測時間", # 觀測時間
+    pressure_hpa     = "^測站氣壓", # 測站氣壓
+    temp             = "^氣溫", # 氣溫
+    humidity_percent = "^相對濕度", # 相對溼度
+    wind_ms          = "^風速", # 風速
+    rain_mm          = "^降水量", # 降水量
+    daylight_hr      = "^日照時數", # 日照時數
+    radiation        = "^全天空日射量" # 全天空日射量
   )
 
   selected_cols <- sapply(regex_patterns, function(pattern) {
@@ -493,8 +477,10 @@ process_weather_month <- function(file_path, month, year = 2024, zone) {
 #' @return A combined data frame produced by \code{\link{process_weather_month}}.
 #' @examples
 #' \dontrun{
-#' df <- combine_weather_month("data/weather/", start_month = 1,
-#'                             end_month = 6, year = 2024, zone = "site_A")
+#' df <- combine_weather_month("data/weather/",
+#'   start_month = 1,
+#'   end_month = 6, year = 2024, zone = "site_A"
+#' )
 #' }
 #' @importFrom dplyr bind_rows
 #' @importFrom purrr map_dfr
