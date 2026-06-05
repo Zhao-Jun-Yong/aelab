@@ -27,7 +27,9 @@ Import and tidy a monthly weather CSV file downloaded from a
 }
 \examples{
 \dontrun{
-df <- process_weather_month("path/to/2024-01.csv", month = 1, year = 2024,
-                            zone = "site_A")
+df <- process_weather_month("path/to/2024-01.csv",
+  month = 1, year = 2024,
+  zone = "site_A"
+)
 }
 }

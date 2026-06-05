@@ -25,6 +25,7 @@ Tidy multiple daily weather data downloaded from weather station in Taiwan.
 weather_data_path <- system.file("extdata", package = "aelab")
 modified_data_path <- paste0(weather_data_path, "/ex_")
 df <- combine_weather(modified_data_path,
-start_date = "2024-01-01",
-end_date = "2024-01-02", "site_A")
+  start_date = "2024-01-01",
+  end_date = "2024-01-02", "site_A"
+)
 }

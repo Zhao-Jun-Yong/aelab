@@ -15,7 +15,7 @@ Imports: tibble, lubridate, stats, dplyr, openxlsx, readxl, ggplot2, readr, tidy
 License: GPL (>= 3)
 Encoding: UTF-8
 RoxygenNote: 7.2.3
-Suggests: knitr, rmarkdown, testthat (>= 3.0.0), rnaturalearthdata
+Suggests: knitr, rmarkdown, testthat (>= 3.0.0), rnaturalearthdata, suncalc
 Config/testthat/edition: 3
 Depends: R (>= 4.1.0)
 VignetteBuilder: knitr

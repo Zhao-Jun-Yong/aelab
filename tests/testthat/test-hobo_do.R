@@ -16,8 +16,8 @@ test_that("process_hobo works with type = 'temp' (HOBO Pro v2)", {
   writeLines(c(
     '"Plot Title","HOBO Pro v2",,',
     '"#","Date Time","Temp, °C","RH, %"',
-    paste0('"1","10/15/2025 上午10時30分00秒","28.5","75.2"'),
-    paste0('"2","10/15/2025 上午11時00分00秒","29.0","74.5"')
+    paste0('"1","05/22/2026 上午10時30分00秒","28.5","75.2"'),
+    paste0('"2","05/22/2026 上午11時00分00秒","29.0","74.5"')
   ), tmp)
 
   data <- process_hobo(tmp, no_hobo = "test", type = "temp")
@@ -27,6 +27,7 @@ test_that("process_hobo works with type = 'temp' (HOBO Pro v2)", {
   expect_true(is.numeric(data$air_temp))
   expect_true(is.numeric(data$rh))
   expect_true(inherits(data$date_time, "POSIXct"))
+  expect_equal(as.integer(format(data$date_time[1], "%Y")), 2026L)
 })
 
 test_that("process_weather works correctly", {
@@ -39,6 +40,77 @@ test_that("process_weather works correctly", {
   expect_true(is.numeric(data$wind_ms))
   expect_true(inherits(data$date_time, "POSIXct"))
   expect_identical("zone_A", data$zone[1])
+})
+
+test_that("process_weather_mh parses MH format correctly", {
+  f <- test_file("ex_weather_mh.txt")
+
+  # hourly (no expansion): 5 data rows -> 5 rows
+  hourly <- process_weather_mh(f, expand_30min = FALSE)
+  expect_true(all(c("stno", "date_time", "pressure_hpa", "wind_ms") %in% names(hourly)))
+  expect_equal(nrow(hourly), 5)
+  expect_true(is.numeric(hourly$pressure_hpa))
+  expect_true(inherits(hourly$date_time, "POSIXct"))
+  expect_identical("Asia/Taipei", attr(hourly$date_time, "tzone"))
+
+  # CWA missing code (-9991) -> NA
+  expect_true(any(is.na(hourly$wind_ms)))
+
+  # hour 24 -> 00:00 of the next day
+  h24 <- hourly[format(hourly$date_time, "%H:%M") == "00:00", ]
+  expect_true(all(format(h24$date_time, "%Y-%m-%d") == "2024-03-02"))
+
+  # station filter
+  one <- process_weather_mh(f, station_id = "C0R660", expand_30min = FALSE)
+  expect_identical(unique(one$stno), "C0R660")
+  expect_error(process_weather_mh(f, station_id = "NOPE"), "No rows")
+
+  # 30-min expansion doubles the rows; hour 1 -> 00:30 and 01:00
+  expanded <- process_weather_mh(f, station_id = "C0R660")
+  expect_equal(nrow(expanded), 2 * 3)
+  expect_true("2024-03-01 00:30:00" %in% format(expanded$date_time))
+})
+
+test_that("combine_weather_mh combines and de-duplicates", {
+  f <- test_file("ex_weather_mh.txt")
+  combined <- combine_weather_mh(c(f, f), expand_30min = FALSE)
+  # same file twice -> de-duplicated back to 5 unique station/time rows
+  expect_equal(nrow(combined), 5)
+})
+
+test_that("filter_complete_days keeps only complete days", {
+  # logger A: a full 48-slot day plus a half day; logger B: one full day
+  full_day <- seq(as.POSIXct("2024-03-01 00:00:00", tz = "Asia/Taipei"),
+                  as.POSIXct("2024-03-01 23:30:00", tz = "Asia/Taipei"),
+                  by = "30 min")
+  half_day <- seq(as.POSIXct("2024-03-02 00:00:00", tz = "Asia/Taipei"),
+                  as.POSIXct("2024-03-02 11:30:00", tz = "Asia/Taipei"),
+                  by = "30 min")
+  df <- rbind(
+    data.frame(no_hobo = "A", date_time = c(full_day, half_day)),
+    data.frame(no_hobo = "B", date_time = full_day)
+  )
+
+  summ <- filter_complete_days(df, summary_only = TRUE)
+  expect_true(all(c("no_hobo", "date", "n_slots", "complete") %in% names(summ)))
+  # the full days are complete (48 slots), the half day is not (24 slots)
+  expect_equal(sum(summ$complete), 2)
+
+  clean <- filter_complete_days(df)
+  expect_true(all(as.Date(clean$date_time, tz = "Asia/Taipei") != as.Date("2024-03-02")))
+  expect_setequal(unique(clean$no_hobo), c("A", "B"))
+})
+
+test_that("add_sun_times attaches plausible sunrise/sunset", {
+  skip_if_not_installed("suncalc")
+  df <- data.frame(date_time = as.POSIXct(
+    c("2024-02-27 10:00:00", "2024-02-27 14:00:00"), tz = "Asia/Taipei"))
+  out <- add_sun_times(df, lat = 22.3900, lon = 120.5777)
+  expect_true(all(c("sunrise", "sunset") %in% names(out)))
+  expect_true(inherits(out$sunrise, "POSIXct"))
+  # FL late-Feb sunrise ~06:2x, sunset ~18:0x
+  expect_equal(format(out$sunrise[1], "%H"), "06")
+  expect_equal(format(out$sunset[1], "%H"), "18")
 })
 
 test_that("process_info works correctly", {

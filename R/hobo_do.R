@@ -4,18 +4,21 @@ utils::globalVariables(c(
   "cor_o2_saturation_pressure", "k", "rate_do_change", "depth_m",
   "flux", "time", "sunrise_time", "sunset_time", "site", "no_hobo",
   "nep_hr", "daylight_hr", "r_hr", "nep_daytime", "r_daytime",
-  "gpp", "r_day", "nep", "hobo", "do", "date", "air_temp", "rh"
+  "gpp", "r_day", "nep", "hobo", "do", "date", "air_temp", "rh",
+  "stno", "yyyymmddhh"
 ))
 
 
 #' @title process_hobo
-#' @importFrom lubridate ceiling_date hours days force_tz
+#' @importFrom lubridate ceiling_date hours days force_tz parse_date_time
 #' @importFrom dplyr arrange
 #' @importFrom utils read.csv
 #' @importFrom stats na.omit aggregate
 #' @description Tidy data exported from a HOBO data logger. Supports the HOBO
 #'   U26 Dissolved Oxygen Data Logger (\code{type = "do"}) and the HOBO Pro v2
-#'   Temperature/RH Logger (\code{type = "temp"}).
+#'   Temperature/RH Logger (\code{type = "temp"}). Handles both Chinese
+#'   (上午/下午) and English (AM/PM or 24-hour) HOBOware locale exports, with
+#'   2- or 4-digit years.
 #' @param file_path Path to the CSV file exported from HOBOware.
 #' @param no_hobo The code for the data logger.
 #' @param type Logger type: \code{"do"} (default) for HOBO U26 DO logger, or
@@ -70,10 +73,17 @@ process_hobo <- function(file_path, no_hobo, type = c("do", "temp")) {
 
     rm(subset_afternoon, subset_morning)
     df$new_variable <- NULL
-  }
 
-  # Fix year mis-parsed as 0025 instead of 2025 in Chinese locale exports
-  df$date_time <- as.POSIXct(gsub("^0025", "2025", format(df$date_time)))
+    # Fix year mis-parsed as 00XX instead of 20XX in Chinese locale exports
+    df$date_time <- as.POSIXct(gsub("^00(\\d{2})", "20\\1", format(df$date_time)))
+  } else {
+    # English locale export: 12-hour AM/PM or 24-hour clock, 2- or 4-digit year
+    df$date_time <- lubridate::parse_date_time(
+      df$date_time,
+      orders = c("mdy IMS p", "mdY IMS p", "mdy HMS", "mdY HMS"),
+      tz = "Asia/Taipei", quiet = TRUE
+    )
+  }
   df$date_time <- lubridate::force_tz(df$date_time, tzone = "Asia/Taipei")
 
   if (type == "do") {
@@ -493,4 +503,242 @@ combine_weather_month <- function(file_path, start_month, end_month,
     file_name <- paste0(file_path, year, "-0", month, ".csv")
     process_weather_month(file_name, month, year = year, zone = zone)
   })
+}
+
+
+#' @title process_weather_mh
+#' @description Import and tidy an hourly weather report in the CWA "MH"
+#'   (Multifield Hourly) text format, as bulk-downloaded from the CODiS portal
+#'   (\code{LotsDataReports.txt}). The file is fixed-/space-delimited with a
+#'   \code{'#'} column-title row listing element codes (e.g. \code{PS01},
+#'   \code{WD01}) and \code{'*'} comment rows. One file may contain multiple
+#'   stations and a full month of hourly data.
+#' @details Element codes are renamed as: \code{PS01} -> \code{pressure_hpa},
+#'   \code{WD01} -> \code{wind_ms}, \code{TX01} -> \code{air_temp},
+#'   \code{RH01} -> \code{humidity}, \code{WD02} -> \code{wind_dir},
+#'   \code{PP01} -> \code{rain_mm}. Only the codes present in the file are
+#'   returned. CWA missing-value codes (large negatives, e.g. -9991) are set to
+#'   \code{NA}. The timestamp \code{yyyymmddhh} uses hours 01-24, where hour 24
+#'   denotes 00:00 of the following day.
+#' @param file_path Path to the MH-format \code{.txt} file.
+#' @param station_id Optional character vector of station codes (e.g.
+#'   \code{"C0R660"}) to keep. Default \code{NULL} keeps all stations.
+#' @param expand_30min If \code{TRUE} (default), each hourly value is expanded to
+#'   the two 30-minute marks (H-1):30 and H:00, matching
+#'   \code{\link{process_weather}} so it merges with 30-minute HOBO data. If
+#'   \code{FALSE}, hourly rows are returned unchanged.
+#' @param tz Time zone of the observations. Default \code{"Asia/Taipei"}.
+#' @return A data frame with columns \code{stno}, \code{date_time}, and the
+#'   renamed weather elements present in the file.
+#' @examples
+#' \dontrun{
+#' df <- process_weather_mh("LotsDataReports.txt", station_id = "C0R660")
+#' }
+#' @importFrom lubridate hours minutes force_tz
+#' @importFrom utils read.table
+#' @export
+
+process_weather_mh <- function(file_path, station_id = NULL,
+                               expand_30min = TRUE, tz = "Asia/Taipei") {
+  lines <- readLines(file_path, warn = FALSE)
+
+  # The column-title row begins with '#'; element codes are space-separated.
+  header_line <- lines[grepl("^#", lines)][1]
+  if (is.na(header_line)) stop("No '#' header row found; not an MH-format file.")
+  col_names <- strsplit(trimws(sub("^#", "", header_line)), "\\s+")[[1]]
+
+  # Data rows: anything not starting with '*' or '#', and non-blank.
+  data_lines <- lines[!grepl("^[*#]", lines) & trimws(lines) != ""]
+  df <- utils::read.table(text = data_lines, col.names = col_names,
+                          colClasses = "character", stringsAsFactors = FALSE,
+                          fill = TRUE)
+
+  if (!is.null(station_id)) {
+    df <- df[df$stno %in% station_id, , drop = FALSE]
+    if (nrow(df) == 0) {
+      stop("No rows for station_id = ", paste(station_id, collapse = ", "))
+    }
+  }
+
+  # MH element code -> friendly name (only those we use downstream are renamed).
+  code_map <- c(PS01 = "pressure_hpa", WD01 = "wind_ms", TX01 = "air_temp",
+                RH01 = "humidity", WD02 = "wind_dir", PP01 = "rain_mm")
+
+  # Coerce numerics; CWA missing-value codes are large negatives (-999x).
+  to_num <- function(x) {
+    v <- suppressWarnings(as.numeric(x))
+    v[!is.na(v) & v <= -90] <- NA
+    v
+  }
+
+  # Parse yyyymmddhh; hour runs 01-24 where 24 == 00:00 of the next day.
+  ts <- df$yyyymmddhh
+  base_date <- as.POSIXct(
+    sprintf("%s-%s-%s", substr(ts, 1, 4), substr(ts, 5, 6), substr(ts, 7, 8)),
+    tz = tz
+  )
+  hh <- as.integer(substr(ts, 9, 10))
+  date_time <- base_date + lubridate::hours(hh)
+
+  out <- data.frame(stno = df$stno, date_time = date_time,
+                    stringsAsFactors = FALSE)
+  for (code in intersect(names(code_map), col_names)) {
+    out[[code_map[[code]]]] <- to_num(df[[code]])
+  }
+
+  # Expand each hour H to the two 30-min marks (H-1):30 and H:00, matching
+  # process_weather()'s convention so it merges with 30-minute HOBO data.
+  if (expand_30min) {
+    half <- out
+    half$date_time <- half$date_time - lubridate::minutes(30)
+    out <- rbind(half, out)
+  }
+
+  out <- out[order(out$stno, out$date_time), , drop = FALSE]
+  out$date_time <- lubridate::force_tz(out$date_time, tzone = tz)
+  rownames(out) <- NULL
+  out
+}
+
+
+#' @title combine_weather_mh
+#' @description Batch-import and combine multiple CWA "MH" (Multifield Hourly)
+#'   weather reports. Hourly CODiS downloads are capped at a one-month range, so
+#'   a date span typically yields several \code{LotsDataReports.txt} files; this
+#'   reads them all and row-binds the result.
+#' @param file_paths Either a character vector of MH file paths, or a single
+#'   directory path (all \code{.txt} files within are read, recursively).
+#' @param station_id Optional character vector of station codes to keep. Passed
+#'   to \code{\link{process_weather_mh}}.
+#' @param expand_30min Passed to \code{\link{process_weather_mh}}. Default
+#'   \code{TRUE}.
+#' @param tz Time zone. Default \code{"Asia/Taipei"}.
+#' @return A combined data frame, de-duplicated and ordered by station and time.
+#' @examples
+#' \dontrun{
+#' df <- combine_weather_mh("data/raw/sw_mono_do/weather_mh",
+#'   station_id = c("C0R660", "C0R850")
+#' )
+#' }
+#' @importFrom purrr map_dfr
+#' @export
+
+combine_weather_mh <- function(file_paths, station_id = NULL,
+                               expand_30min = TRUE, tz = "Asia/Taipei") {
+  if (length(file_paths) == 1 && dir.exists(file_paths)) {
+    file_paths <- list.files(file_paths, pattern = "\\.txt$",
+                             full.names = TRUE, recursive = TRUE)
+  }
+  if (length(file_paths) == 0) stop("No MH .txt files found.")
+
+  out <- purrr::map_dfr(file_paths, function(f) {
+    tryCatch(
+      process_weather_mh(f, station_id = station_id,
+                         expand_30min = expand_30min, tz = tz),
+      error = function(e) {
+        warning("Skipping ", basename(f), ": ", conditionMessage(e))
+        NULL
+      }
+    )
+  })
+
+  out <- out[!duplicated(out[c("stno", "date_time")]), , drop = FALSE]
+  out <- out[order(out$stno, out$date_time), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
+
+#' @title filter_complete_days
+#' @description Keep only the calendar days that have (near-)complete diel
+#'   coverage, per logger. A day qualifies when the number of distinct
+#'   time-of-day slots present reaches \code{min_slots}. This replaces the manual
+#'   inspection of which deployment days run a full 00:00-24:00, so daily DO
+#'   metabolism is computed only from complete days.
+#' @param df A data frame of HOBO readings, e.g. from \code{\link{process_hobo}}
+#'   or \code{\link{combine_hobo}}, containing a POSIXct time column.
+#' @param group_cols Character vector of grouping columns identifying one logger
+#'   deployment, default \code{"no_hobo"}.
+#' @param time_col Name of the POSIXct time column. Default \code{"date_time"}.
+#' @param min_slots Minimum number of distinct 30-minute slots a day must have to
+#'   count as complete. Default \code{44} (of 48; allows minor gaps).
+#' @param tz Time zone used to derive the calendar date. Default
+#'   \code{"Asia/Taipei"}.
+#' @param summary_only If \code{TRUE}, return a per-day summary
+#'   (\code{group_cols}, \code{date}, \code{n_slots}, \code{complete}) instead of
+#'   the filtered readings. Useful for inspecting coverage. Default \code{FALSE}.
+#' @return Either the input rows restricted to complete days (default), or a
+#'   coverage summary when \code{summary_only = TRUE}.
+#' @examples
+#' \dontrun{
+#' hobo <- combine_hobo("data/raw/sw_mono_do/csv/FL_T1")
+#' filter_complete_days(hobo, summary_only = TRUE)   # inspect coverage
+#' clean <- filter_complete_days(hobo)               # keep complete days
+#' }
+#' @importFrom dplyr mutate summarise filter semi_join n_distinct all_of
+#' @export
+
+filter_complete_days <- function(df, group_cols = "no_hobo",
+                                 time_col = "date_time", min_slots = 44L,
+                                 tz = "Asia/Taipei", summary_only = FALSE) {
+  if (!time_col %in% names(df)) stop("Column '", time_col, "' not found.")
+  n_slots <- complete <- NULL
+
+  d <- dplyr::mutate(
+    df,
+    date = as.Date(.data[[time_col]], tz = tz),
+    slot_id = format(.data[[time_col]], "%H:%M")
+  )
+
+  summ <- dplyr::summarise(
+    d,
+    n_slots = dplyr::n_distinct(slot_id),
+    .by = dplyr::all_of(c(group_cols, "date"))
+  )
+  summ <- dplyr::mutate(summ, complete = n_slots >= min_slots)
+
+  if (summary_only) return(summ)
+
+  keep <- dplyr::filter(summ, complete)
+  out <- dplyr::semi_join(d, keep, by = c(group_cols, "date"))
+  out$slot_id <- NULL
+  out
+}
+
+
+#' @title add_sun_times
+#' @description Attach per-day sunrise and sunset times to a data frame of
+#'   readings, computed from a site's coordinates with the \pkg{suncalc}
+#'   package. Replaces the manual lookup of sunrise/sunset for each deployment
+#'   date; the resulting \code{sunrise}/\code{sunset} columns are consumed by
+#'   \code{\link{calculate_do}}.
+#' @param df A data frame containing a POSIXct time column.
+#' @param lat,lon Site latitude and longitude in decimal degrees (length 1).
+#' @param time_col Name of the POSIXct time column. Default \code{"date_time"}.
+#' @param tz Time zone for the returned sun times. Default \code{"Asia/Taipei"}.
+#' @return \code{df} with two added POSIXct columns, \code{sunrise} and
+#'   \code{sunset}, matched to each row's calendar date.
+#' @examples
+#' \dontrun{
+#' df <- add_sun_times(df, lat = 22.3900, lon = 120.5777)
+#' }
+#' @export
+
+add_sun_times <- function(df, lat, lon, time_col = "date_time",
+                          tz = "Asia/Taipei") {
+  if (!requireNamespace("suncalc", quietly = TRUE)) {
+    stop("Package 'suncalc' is required; install it with ",
+         "install.packages('suncalc').")
+  }
+  if (!time_col %in% names(df)) stop("Column '", time_col, "' not found.")
+
+  dates <- as.Date(df[[time_col]], tz = tz)
+  st <- suncalc::getSunlightTimes(
+    date = sort(unique(dates)), lat = lat, lon = lon,
+    keep = c("sunrise", "sunset"), tz = tz
+  )
+  idx <- match(dates, st$date)
+  df$sunrise <- st$sunrise[idx]
+  df$sunset <- st$sunset[idx]
+  df
 }

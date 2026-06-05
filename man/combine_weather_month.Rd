@@ -32,7 +32,9 @@ File names are expected to follow the pattern
 }
 \examples{
 \dontrun{
-df <- combine_weather_month("data/weather/", start_month = 1,
-                            end_month = 6, year = 2024, zone = "site_A")
+df <- combine_weather_month("data/weather/",
+  start_month = 1,
+  end_month = 6, year = 2024, zone = "site_A"
+)
 }
 }

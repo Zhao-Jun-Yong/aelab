@@ -4,18 +4,28 @@
 \alias{process_hobo}
 \title{process_hobo}
 \usage{
-process_hobo(file_path, no_hobo)
+process_hobo(file_path, no_hobo, type = c("do", "temp"))
 }
 \arguments{
-\item{file_path}{Directory of file.}
+\item{file_path}{Path to the CSV file exported from HOBOware.}
 
 \item{no_hobo}{The code for the data logger.}
+
+\item{type}{Logger type: \code{"do"} (default) for HOBO U26 DO logger, or
+\code{"temp"} for HOBO Pro v2 temperature/RH logger.}
 }
 \value{
-A dataframe.
+A dataframe. For \code{type = "do"}: columns \code{date_time},
+  \code{do}, \code{temp}, \code{no_hobo}, aggregated to 30-minute intervals.
+  For \code{type = "temp"}: columns \code{date_time}, \code{air_temp},
+  \code{rh}, \code{no_hobo}, one row per logger reading.
 }
 \description{
-Tidy the data retrieved from HOBO U26 Dissolved Oxygen Data Logger.
+Tidy data exported from a HOBO data logger. Supports the HOBO
+  U26 Dissolved Oxygen Data Logger (\code{type = "do"}) and the HOBO Pro v2
+  Temperature/RH Logger (\code{type = "temp"}). Handles both Chinese
+  (上午/下午) and English (AM/PM or 24-hour) HOBOware locale exports, with
+  2- or 4-digit years.
 }
 \examples{
 hobo_data_path <- system.file("extdata", "ex_hobo.csv", package = "aelab")
