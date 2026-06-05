@@ -25,7 +25,9 @@ Tidy data exported from a HOBO data logger. Supports the HOBO
   U26 Dissolved Oxygen Data Logger (\code{type = "do"}) and the HOBO Pro v2
   Temperature/RH Logger (\code{type = "temp"}). Handles both Chinese
   (上午/下午) and English (AM/PM or 24-hour) HOBOware locale exports, with
-  2- or 4-digit years.
+  2- or 4-digit years. For \code{type = "do"}, readings with a negative
+  (sensor-error) dissolved-oxygen or temperature value are dropped before
+  aggregation.
 }
 \examples{
 hobo_data_path <- system.file("extdata", "ex_hobo.csv", package = "aelab")

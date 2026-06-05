@@ -1,5 +1,20 @@
 # aelab 1.1.6
 
+## New functions
+
+* `process_weather_mh()` / `combine_weather_mh()` — import the CWA "MH"
+  (Multifield Hourly) bulk weather report downloaded from the CODiS portal
+  (`LotsDataReports.txt`). Maps `PS01` -> `pressure_hpa` and `WD01` -> `wind_ms`
+  (plus temperature, humidity, wind direction, rain), handles the 01-24 hour
+  convention and CWA missing-value codes, and optionally expands hourly values to
+  30-minute marks. `combine_weather_mh()` reads a folder of monthly files and
+  de-duplicates.
+* `filter_complete_days()` — keep only the calendar days with (near-)complete
+  diel coverage per logger (default >= 44 of 48 half-hour slots), replacing manual
+  inspection of which deployment days are full.
+* `add_sun_times()` — attach per-date sunrise/sunset to a data frame from a site's
+  coordinates using the suncalc package, replacing manual sunrise/sunset lookup.
+
 ## Modified functions
 
 * `process_hobo()` — added `type` parameter (`"do"` or `"temp"`). `type = "do"` (default)
@@ -7,6 +22,10 @@
   adds support for the HOBO Pro v2 Temperature/RH Logger; returns columns `date_time`,
   `air_temp`, `rh`, `no_hobo` (one row per reading, no 30-min aggregation). Both types now
   include a year fix for Chinese locale exports that mis-parse the year as 0025.
+  Now also parses English-locale exports (AM/PM or 24-hour clock, 2- or 4-digit
+  years) in addition to the Chinese (上午/下午) locale, and for `type = "do"` drops
+  readings with a negative (sensor-error) DO or temperature value before
+  aggregation.
 
 # aelab 1.1.5
 

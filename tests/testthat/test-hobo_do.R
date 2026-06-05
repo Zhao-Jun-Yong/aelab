@@ -9,6 +9,28 @@ test_that("process_hobo works correctly", {
   expect_true(all(!is.na(data$temp)))
 })
 
+test_that("process_hobo drops negative DO/temperature sensor errors", {
+  tmp <- tempfile(fileext = ".csv")
+  on.exit(unlink(tmp))
+  # 2 header rows + 4 readings; rows 2 and 3 have a negative DO / temp
+  # all four readings fall in the same 10:30 half-hour bin
+  writeLines(c(
+    '"Plot Title: test"',
+    '"#","Date Time, GMT+08:00","DO conc, mg/L","Temp, °C"',
+    '1,02/27/24 10:05:00 AM,8.0,25.0',
+    '2,02/27/24 10:10:00 AM,-0.5,25.1',
+    '3,02/27/24 10:15:00 AM,8.1,-3.0',
+    '4,02/27/24 10:20:00 AM,8.2,25.2'
+  ), tmp)
+
+  data <- process_hobo(tmp, no_hobo = "t")
+  # only the 2 valid readings (8.0, 8.2) should remain -> mean 8.1
+  expect_true(all(data$do >= 0))
+  expect_true(all(data$temp >= 0))
+  expect_equal(nrow(data), 1L)
+  expect_equal(round(data$do[1], 2), 8.1)
+})
+
 test_that("process_hobo works with type = 'temp' (HOBO Pro v2)", {
   tmp <- tempfile(fileext = ".csv")
   on.exit(unlink(tmp))

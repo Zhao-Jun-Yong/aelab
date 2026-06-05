@@ -18,7 +18,9 @@ utils::globalVariables(c(
 #'   U26 Dissolved Oxygen Data Logger (\code{type = "do"}) and the HOBO Pro v2
 #'   Temperature/RH Logger (\code{type = "temp"}). Handles both Chinese
 #'   (上午/下午) and English (AM/PM or 24-hour) HOBOware locale exports, with
-#'   2- or 4-digit years.
+#'   2- or 4-digit years. For \code{type = "do"}, readings with a negative
+#'   (sensor-error) dissolved-oxygen or temperature value are dropped before
+#'   aggregation.
 #' @param file_path Path to the CSV file exported from HOBOware.
 #' @param no_hobo The code for the data logger.
 #' @param type Logger type: \code{"do"} (default) for HOBO U26 DO logger, or
@@ -89,6 +91,11 @@ process_hobo <- function(file_path, no_hobo, type = c("do", "temp")) {
   if (type == "do") {
     df$do <- as.numeric(df$do)
     df$temp <- as.numeric(df$temp)
+
+    # Drop physically-impossible readings (sensor errors): a negative DO or
+    # water temperature is invalid, so exclude the whole reading before it can
+    # bias the 30-minute means or the downstream metabolism calculation.
+    df <- df[!is.na(df$do) & !is.na(df$temp) & df$do >= 0 & df$temp >= 0, ]
 
     df$time <- format(df$date_time, "%H:%M:%S")
     df$date_time <- as.factor(lubridate::ceiling_date(df$date_time, unit = "30 minutes"))
