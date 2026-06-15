@@ -556,9 +556,11 @@ process_weather_mh <- function(file_path, station_id = NULL,
 
   # Data rows: anything not starting with '*' or '#', and non-blank.
   data_lines <- lines[!grepl("^[*#]", lines) & trimws(lines) != ""]
-  df <- utils::read.table(text = data_lines, col.names = col_names,
-                          colClasses = "character", stringsAsFactors = FALSE,
-                          fill = TRUE)
+  df <- utils::read.table(
+    text = data_lines, col.names = col_names,
+    colClasses = "character", stringsAsFactors = FALSE,
+    fill = TRUE
+  )
 
   if (!is.null(station_id)) {
     df <- df[df$stno %in% station_id, , drop = FALSE]
@@ -568,8 +570,10 @@ process_weather_mh <- function(file_path, station_id = NULL,
   }
 
   # MH element code -> friendly name (only those we use downstream are renamed).
-  code_map <- c(PS01 = "pressure_hpa", WD01 = "wind_ms", TX01 = "air_temp",
-                RH01 = "humidity", WD02 = "wind_dir", PP01 = "rain_mm")
+  code_map <- c(
+    PS01 = "pressure_hpa", WD01 = "wind_ms", TX01 = "air_temp",
+    RH01 = "humidity", WD02 = "wind_dir", PP01 = "rain_mm"
+  )
 
   # Coerce numerics; CWA missing-value codes are large negatives (-999x).
   to_num <- function(x) {
@@ -587,8 +591,10 @@ process_weather_mh <- function(file_path, station_id = NULL,
   hh <- as.integer(substr(ts, 9, 10))
   date_time <- base_date + lubridate::hours(hh)
 
-  out <- data.frame(stno = df$stno, date_time = date_time,
-                    stringsAsFactors = FALSE)
+  out <- data.frame(
+    stno = df$stno, date_time = date_time,
+    stringsAsFactors = FALSE
+  )
   for (code in intersect(names(code_map), col_names)) {
     out[[code_map[[code]]]] <- to_num(df[[code]])
   }
@@ -633,15 +639,19 @@ process_weather_mh <- function(file_path, station_id = NULL,
 combine_weather_mh <- function(file_paths, station_id = NULL,
                                expand_30min = TRUE, tz = "Asia/Taipei") {
   if (length(file_paths) == 1 && dir.exists(file_paths)) {
-    file_paths <- list.files(file_paths, pattern = "\\.txt$",
-                             full.names = TRUE, recursive = TRUE)
+    file_paths <- list.files(file_paths,
+      pattern = "\\.txt$",
+      full.names = TRUE, recursive = TRUE
+    )
   }
   if (length(file_paths) == 0) stop("No MH .txt files found.")
 
   out <- purrr::map_dfr(file_paths, function(f) {
     tryCatch(
-      process_weather_mh(f, station_id = station_id,
-                         expand_30min = expand_30min, tz = tz),
+      process_weather_mh(f,
+        station_id = station_id,
+        expand_30min = expand_30min, tz = tz
+      ),
       error = function(e) {
         warning("Skipping ", basename(f), ": ", conditionMessage(e))
         NULL
@@ -679,8 +689,8 @@ combine_weather_mh <- function(file_paths, station_id = NULL,
 #' @examples
 #' \dontrun{
 #' hobo <- combine_hobo("data/raw/sw_mono_do/csv/FL_T1")
-#' filter_complete_days(hobo, summary_only = TRUE)   # inspect coverage
-#' clean <- filter_complete_days(hobo)               # keep complete days
+#' filter_complete_days(hobo, summary_only = TRUE) # inspect coverage
+#' clean <- filter_complete_days(hobo) # keep complete days
 #' }
 #' @importFrom dplyr mutate summarise filter semi_join n_distinct all_of
 #' @export
@@ -704,7 +714,9 @@ filter_complete_days <- function(df, group_cols = "no_hobo",
   )
   summ <- dplyr::mutate(summ, complete = n_slots >= min_slots)
 
-  if (summary_only) return(summ)
+  if (summary_only) {
+    return(summ)
+  }
 
   keep <- dplyr::filter(summ, complete)
   out <- dplyr::semi_join(d, keep, by = c(group_cols, "date"))
@@ -734,8 +746,10 @@ filter_complete_days <- function(df, group_cols = "no_hobo",
 add_sun_times <- function(df, lat, lon, time_col = "date_time",
                           tz = "Asia/Taipei") {
   if (!requireNamespace("suncalc", quietly = TRUE)) {
-    stop("Package 'suncalc' is required; install it with ",
-         "install.packages('suncalc').")
+    stop(
+      "Package 'suncalc' is required; install it with ",
+      "install.packages('suncalc')."
+    )
   }
   if (!time_col %in% names(df)) stop("Column '", time_col, "' not found.")
 

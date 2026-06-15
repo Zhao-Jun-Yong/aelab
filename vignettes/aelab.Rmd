@@ -2,7 +2,7 @@
 title: "aelab"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{instruction}
+  %\VignetteIndexEntry{aelab}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -10,7 +10,7 @@ vignette: >
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(warning = FALSE)
 knitr::opts_chunk$set(message = FALSE)
-rmarkdown.html_vignette.check_title = FALSE
+options(rmarkdown.html_vignette.check_title = FALSE)
 library(aelab)
 library(readxl)
 library(tibble)
@@ -25,11 +25,13 @@ library(ggplot2)
 
 The goal of achieving net zero emissions by 2050 is a significant driver of research focused on understanding greenhouse gas (GHG) flux dynamics and the autotrophic production of ecosystems. This ambitious target highlights the urgent need to explore how different ecosystems contribute to GHG emissions and how they can be managed to reduce these emissions effectively. To support this research, this R package offers a variety of useful tools designed to facilitate the analysis of data related to GHG flux and production in aquatic environments.
 
+This vignette is organized into four parts: **GHG flux calculation**, covering static-chamber flux measurements from raw analyser output through to a final flux estimate; **NEM calculation**, covering dissolved oxygen (DO) logger data and the resulting gross primary production (GPP), ecosystem respiration (ER), and net ecosystem metabolism (NEM); **Statistical analysis**, a set of helpers for descriptive statistics, outlier detection, normality testing, and group comparisons; and **Visualization**, plotting wrappers and colour palettes built on a shared theme.
+
 # GHG flux calculation
 
 Various techniques are used to measure greenhouse gas (GHG) flux, including eddy covariance (EC), the boundary layer method (BLM), and the static chamber method. This study provides R functions specifically designed to analyze data from GHG flux measurements using the static chamber method with a portable gas analyzer.
  
-## Load and process the raw data file
+## Load and process the raw data file — `tidy_ghg_analyzer()`
 
 First, we need to obtain necessary parameters from the raw data downloaded from the portable gas analyzer. We will remove unnecessary rows and columns and extract the GHG concentrations along with the corresponding date and time recorded by the analyzer using `tidy_ghg_analyzer()`. Additionally, this function will also eliminate any NaN values in the GHG data. Currently, this function supports raw data downloaded from:  
 (i) LI-COR Trace Gas Analyzer (LI-7810 and LI-7820).
@@ -52,9 +54,9 @@ ch4 <- convert_time(ch4, min = -15, sec = 30)
 ch4[c(1:3), c(5:6)]
 ```
 
-## Calculate the slope
+## Calculate the slope — `calculate_regression()`
 
-We first need to obtain the slope from the linear regression of GHG concentration changes over time within the chamber to calculate the flux. This can be done by defining the measurement time interval, either from a reference file (see Method 1 below) or directly in R (see Method 2 below).
+We first need to obtain the slope from the linear regression of GHG concentration changes over time within the chamber to calculate the flux. This can be done by defining the measurement time interval from a reference file (see Method 1 below), directly in R (see Method 2 below), or from a compact inline string via `make_reference()` (see Method 3 below).
 
 ### Method 1: Load from excel
 
@@ -66,14 +68,14 @@ ref <- read_excel(ref_data_path)
 ref
 ```
 
-Now, we can perform regressions on the GHG concentrations using `calculate_regression()`. The reference file must contain a `date_time` column (measurement start times), a `site` column, and an `analyzer` column (e.g. `"1337"`).
+Now, we can perform regressions on the GHG concentrations using `calculate_regression()`. The data frame passed to its `reference_df` argument — here, `ref` — must contain a `date_time` column (measurement start times), a `site` column, and an `analyzer` column (e.g. `"1337"`).
 
 ### Window type
 
 Two window modes are available via `window_type`:
 
 - **`"sliding"`** (default): moves a fixed-length sub-window (default `num_rows = 300` rows ≈ 5 min) across the full measurement period and keeps the position with the highest R². Useful when the exact measurement start is uncertain.
-- **`"fixed"`**: fits a single window of `duration_minutes` starting at `start_offset_s` seconds after the reference time. More reproducible — all gases are evaluated over the same interval. The first 30 s of chamber deployment are mechanically disturbed; skipping them with `start_offset_s = 30` is recommended.
+- **`"fixed"`**: fits a single window of `duration_minutes` starting at `start_offset_s` seconds after the reference time. More reproducible — all gases are evaluated over the same interval. The first 30 s of chamber deployment — the "dead-bar period" — are mechanically disturbed; skipping them with `start_offset_s = 30` is recommended.
 
 ```{r}
 # Sliding window (default): best 5-min sub-window within 7-min period
@@ -100,7 +102,7 @@ The `fit_type` parameter controls the regression model:
 - **`"exp_tz"`** / **`"exp_zhao18"`**: Hutchinson–Mosier nonlinear exponential models; slope evaluated at `t_zero`.
 - **`"auto"`**: tries linear → quadratic → exp_tz in sequence, accepting a more complex model only when R² improves by > 0.01 and the exponential curvature parameter *b* does not exceed κ~max~ (Hüppi et al. 2018). The model chosen for each measurement is recorded in the `fit_used` output column.
 
-When `fit_type = "auto"`, analyser precision is looked up automatically from the built-in `analyzer_precision` dataset (LI-7810, LI-7820, and LGR UGGA) if `instrument_precision` is not supplied. The lookup matches the `analyzer_code` argument against model names case-insensitively, so `"LGR"` correctly resolves to LGR UGGA precision rather than falling back to LI-7810.
+When `fit_type = "auto"`, analyser precision is looked up automatically from the built-in `analyzer_precision` dataset (LI-7810, LI-7820, and LGR UGGA) if `instrument_precision` (see Quality flags below) is not supplied. The lookup matches the `analyzer_code` argument against model names case-insensitively, so `"LGR"` correctly resolves to LGR UGGA precision rather than falling back to LI-7810.
 
 ```{r}
 # Auto model selection with fixed window and 30-s dead-bar skip
@@ -121,7 +123,7 @@ Each measurement receives a `flag` in the output:
 | `zero` | No detectable trend (correlation below threshold, or slope within instrument noise) |
 | `no_data` | Insufficient data in the window |
 
-Two optional parameters tighten the QC:
+Two optional parameters tighten the quality control:
 
 - **`instrument_precision`**: analyser precision in ppm. Slopes whose absolute value falls below `precision / window_duration_s` are flagged `"zero"` even if R² passes. Also used by `fit_type = "auto"` to compute κ~max~ per measurement.
 - **`g_factor_threshold`**: when `fit_type = "auto"` selects a nonlinear model, the g-factor (chosen slope / linear baseline slope) is computed and recorded in the `g_factor` output column. If `abs(g_factor) > g_factor_threshold`, the flag is overridden to `"discard"` (Gaudard et al. 2025). Default `NULL` (disabled).
@@ -180,7 +182,7 @@ make_reference(
 )
 ```
 
-## Calculate the flux
+## Calculate the flux — `calculate_ghg_flux()`
 
 The equation we used to calculate the GHG flux was derived from Yong et al. (2024):
 
@@ -235,7 +237,7 @@ calculate_MDF(
 
 ### `calculate_total_co2e()`
 
-`calculate_total_co2e()` aggregates individual GHG fluxes (mg m⁻² h⁻¹) into a single total CO₂-equivalent flux (g m⁻² d⁻¹) using IPCC AR6 100-year GWPs (CH₄ = 27, N₂O = 273).
+`calculate_total_co2e()` aggregates individual GHG fluxes (mg m⁻² h⁻¹) into a single total CO₂-equivalent flux (g m⁻² d⁻¹) using IPCC AR6 100-year Global Warming Potentials (GWPs; CH₄ = 27, N₂O = 273).
 
 ```{r}
 calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003)
@@ -245,11 +247,9 @@ calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003)
 
 The change in oxygen concentration in the water reflects the balance between photosynthetic production, respiratory consumption, and physical exchange at the water-atmosphere interface. By measuring dissolved oxygen (DO) concentrations at high frequency with in situ data loggers, we can calculate gross primary production (GPP), ecosystem respiration (ER), and net ecosystem metabolism (NEM), as detailed by Staehr et al. (2010).
 
-## Load and process the raw data file
+## Load and process the HOBO logger data — `process_hobo()`
 
-First, we need to obtain the necessary parameters from the raw data downloaded from the data loggers. We will remove unnecessary rows and columns and extract the dissolved oxygen concentrations and water temperature, along with the corresponding date and time recorded by the logger using `process_hobo()`. This function will also eliminate any NA values in the dataframe, and for `type = "do"` it drops readings with a negative (sensor-error) DO or temperature value. It accepts both Chinese (上午/下午) and English (AM/PM or 24-hour) HOBOware locale exports. The `no_hobo` input was necessary for further analysis. `process_hobo()` supports two logger types via the `type` argument: `type = "do"` (default) for the HOBO U26 Dissolved Oxygen Data Logger, and `type = "temp"` for the HOBO Pro v2 Temperature/RH Logger (returns columns `air_temp` and `rh` instead of `do` and `temp`, with one row per reading).
-
-For batch HOBO DO workflows, `combine_hobo()` reads a folder of logger exports, `filter_complete_days()` keeps only days with (near-)complete diel coverage, `add_sun_times()` attaches per-date sunrise/sunset from site coordinates (via suncalc), and `process_weather_mh()` / `combine_weather_mh()` import bulk hourly weather in the CWA CODiS "MH" format as an alternative to the per-day `process_weather()`.
+First, we need to obtain the necessary parameters from the raw data downloaded from the data loggers. `process_hobo()` removes unnecessary rows and columns, extracts the dissolved oxygen concentration and water temperature along with their date and time, drops rows with `NA` values, and labels the output with the supplied `no_hobo` identifier for use in later steps.
 
 ```{r}
 hobo_data_path <- system.file("extdata", "ex_hobo.csv", package = "aelab")
@@ -257,7 +257,9 @@ do <- process_hobo(hobo_data_path, no_hobo = "code_for_logger", type = "do")
 do[c(1:3), ]
 ```
 
-The air pressure and wind speed at the sampling site should be obtained either manually or from a nearby weather station. The `process_weather` function tidies the CSV file downloaded from Taiwan's weather station. In addition to extracting the columns with air pressure and wind speed values, it also duplicates the hourly data to match the half-hourly recorded frequency of the DO concentrations.
+`process_hobo()` accepts both Chinese (上午/下午) and English (AM/PM or 24-hour) HOBOware locale exports. For `type = "do"` (the default, used above for a HOBO U26 Dissolved Oxygen Data Logger), it also drops readings with a negative (sensor-error) DO or temperature value. Set `type = "temp"` to process a HOBO Pro v2 Temperature/RH Logger instead, which returns `air_temp` and `rh` columns in place of `do` and `temp`, with one row per reading.
+
+The air pressure and wind speed at the sampling site should be obtained either manually or from a nearby weather station. `process_weather()` tidies the CSV file downloaded from Taiwan's weather station. In addition to extracting the columns with air pressure and wind speed values, it also duplicates the hourly data to match the half-hourly recorded frequency of the DO concentrations.
 
 ```{r}
 weather_data_path <- system.file("extdata", "ex_weather.csv", package = "aelab")
@@ -265,7 +267,7 @@ weather <- process_weather(weather_data_path, date = "2024-04-10", zone = "zone_
 weather[c(1:5), ]
 ```
 
-In addition to the previously mentioned parameters, we also needed the water depth, salinity, start and end date and time of the data logger deployment, and the sunrise and sunset times during that period. These parameters can be entered in Excel and then imported into R using `process_info()` to ensure that all necessary parameters are included. The column `zone` corresponds to `process_weather()`, and column `no_hobo` corresponds to `process_hobo()`.
+In addition to the previously mentioned parameters, we also need the water depth, salinity, start and end date and time of the data logger deployment, and the sunrise and sunset times during that period. These parameters can be entered in Excel and then imported into R using `process_info()` to ensure that all necessary parameters are included. The column `zone` corresponds to `process_weather()`, and column `no_hobo` corresponds to `process_hobo()`.
 
 ```{r}
 info_data_path <- system.file("extdata", "info.xlsx", package = "aelab")
@@ -273,7 +275,7 @@ info <- process_info(info_data_path)
 info
 ```
 
-Finally, we can merge the dataframe containing air pressure and wind speed data from `process_weather()` with the processed data downloaded from the data loggers. Next, we will combine this with the other necessary parameters using the `zone` and `no_hobo` columns. We can use the `plot_hobo()` function to inspect the changes in DO concentrations.
+We can then merge the air pressure and wind speed data from `process_weather()` with the processed logger data, combine the result with the remaining parameters using the `zone` and `no_hobo` columns, and use `plot_hobo()` to inspect the resulting DO concentrations.
 
 ```{r}
 data <- merge(weather, do, by = "date_time")
@@ -283,9 +285,77 @@ merged_df[c(1:3), ]
 plot_hobo(merged_df)
 ```
 
-## Calculate GPP and ER
+## Batch processing with automated weather and sun times
 
-GPP and ER can be calculated using `calculate_do()`. NEM (denoted as `nep` in the output dataframe) was calculated by GPP + ER.
+For multi-site or multi-day deployments, the steps above can be replaced with a batch pipeline built from five functions: `combine_hobo()` reads every logger file in a folder, `filter_complete_days()` keeps only days with (near-)complete diel coverage, `add_sun_times()` computes sunrise and sunset from site coordinates instead of looking them up, and `process_weather_mh()` / `combine_weather_mh()` import weather in bulk from Taiwan's Central Weather Administration (CWA) CODiS portal instead of one file per day.
+
+### Combine logger files in a folder — `combine_hobo()`
+
+`combine_hobo()` applies `process_hobo()` to every file in a folder matching `file_prefix` and row-binds the result.
+
+```{r}
+hobo_data_dir <- system.file("extdata", package = "aelab")
+hobo_all <- combine_hobo(hobo_data_dir, file_prefix = "ex_ho")
+hobo_all[c(1:3), ]
+```
+
+### Keep only complete days — `filter_complete_days()`
+
+`filter_complete_days()` drops calendar days where a logger has fewer than `min_slots` distinct 30-minute readings (default 44 of 48), so partial days at the start or end of a deployment don't bias the daily metabolism estimate. Set `summary_only = TRUE` to inspect per-day coverage before filtering.
+
+```{r}
+filter_complete_days(hobo_all, summary_only = TRUE)
+```
+
+```{r}
+hobo_complete <- filter_complete_days(hobo_all)
+nrow(hobo_complete)
+```
+
+### Sunrise and sunset from site coordinates — `add_sun_times()`
+
+`add_sun_times()` attaches per-date `sunrise` and `sunset` columns computed from the site's latitude and longitude using the suncalc package, removing the need to look these up manually for `process_info()`.
+
+```{r}
+hobo_complete <- add_sun_times(hobo_complete, lat = 22.3900, lon = 120.5777)
+hobo_complete[c(1:3), ]
+```
+
+### Bulk weather import
+
+The CWA CODiS portal caps hourly downloads at one month, so a deployment typically spans several `LotsDataReports.txt` files in the "MH" (Multifield Hourly) format. `process_weather_mh()` parses one such file; `combine_weather_mh()` reads every `.txt` file in a directory (recursively), row-binds, and de-duplicates by station and time. Both expand hourly values to the 30-minute marks expected by `calculate_do()`.
+
+```{r}
+weather_mh_path <- system.file("extdata", "ex_weather_mh.txt", package = "aelab")
+process_weather_mh(weather_mh_path, station_id = "C0R660")
+```
+
+```{r}
+weather_dir <- system.file("extdata", package = "aelab")
+combine_weather_mh(weather_dir, station_id = c("C0R660", "C0R850"))
+```
+
+### Putting it together
+
+For each site, merge its hobo data with the matching station's weather by `date_time`, attach site metadata, and run `calculate_do()`:
+
+```{r eval=FALSE}
+weather <- combine_weather_mh("path/to/weather_mh", station_id = "C0R660")
+
+hobo <- combine_hobo("path/to/logger_csvs/site_A")
+hobo <- filter_complete_days(hobo)
+hobo <- add_sun_times(hobo, lat = 22.3900, lon = 120.5777)
+hobo$site <- "site_A"
+hobo$depth_m <- 2.0
+hobo$salinity <- 30
+
+merged <- merge(hobo, weather[c("date_time", "pressure_hpa", "wind_ms")], by = "date_time")
+calculate_do(merged)
+```
+
+## Calculate GPP and ER — `calculate_do()`
+
+`calculate_do()` returns one row per logger-day with the columns `r_day` (ecosystem respiration, ER), `gpp` (gross primary production, GPP), and `nep` (net ecosystem metabolism, NEM). NEM is calculated as GPP + ER.
 
 ```{r}
 calculate_do(merged_df)
@@ -396,7 +466,7 @@ When the raw observations used for testing differ from the plotted data (e.g. th
 
 # Visualization
 
-aelab provides plot wrappers — `plot_point()`, `plot_line()`, `plot_box()`, and `plot_bar()` — with a consistent theme built on Century Gothic. Custom colour palettes are available through `aelab_palettes()`, `scale_fill_aelab_d()`, and related scale functions.
+aelab provides plot wrappers — `plot_point()`, `plot_line()`, `plot_box()`, and `plot_bar()` — with a consistent theme built on Century Gothic. Custom colour palettes are available through `aelab_palettes()` and the discrete and continuous scale functions `scale_colour_aelab_d()`, `scale_fill_aelab_d()`, `scale_colour_aelab_c()`, and `scale_fill_aelab_c()`.
 
 The example below previews the `"ghg"` palette and applies it to a box plot comparing CH₄ fluxes across three habitat types.
 
@@ -414,7 +484,7 @@ plot_box(df_vis, site, ch4, site) +
   scale_fill_aelab_d("ghg")
 ```
 
-# Reference
+# References
 
 Gaudard, J., Telford, R. J., & Halbritter, A. H. (2025). fluxible: An R package to process ecosystem gas fluxes from closed-loop chambers in an automated and reproducible way. Methods in Ecology and Evolution, 00, 1–9. https://doi.org/10.1111/2041-210X.70161
 
