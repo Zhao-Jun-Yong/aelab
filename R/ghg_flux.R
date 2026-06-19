@@ -820,12 +820,13 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 #' @title convert_ghg_unit
 #' @description Convert a greenhouse gas (GHG) flux value (or a character string
 #'   containing one or more numeric values, e.g. \code{"0.002 +/- 0.003"})
-#'   to micrograms per square meter per hour.
+#'   between flux units. Defaults to micrograms per square meter per hour.
 #' @details Numeric values embedded in a string (e.g. mean +/- SD notation)
 #'   are each converted individually and the surrounding text is preserved.
 #'   Commas are treated as decimal separators.
-#' @param input A single numeric value or a character string containing one or
-#'   more numbers.
+#' @param input A numeric vector or a character string containing one or more
+#'   numbers. Numeric vectors are handled element-wise, making the function
+#'   compatible with \code{dplyr::mutate()}.
 #' @param ghg The molecular formula of the greenhouse gas: \code{"co2"},
 #'   \code{"ch4"}, or \code{"n2o"}.
 #' @param mass Mass unit of the input flux. One of \code{"mmol"}, \code{"mg"},
@@ -835,45 +836,50 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 #'   Default \code{"m2"}.
 #' @param time Time unit of the input flux. One of \code{"yr"}, \code{"day"},
 #'   \code{"hr"}, \code{"sec"}, \code{"min"}. Default \code{"hr"}.
+#' @param to_mass Target mass unit. Same options as \code{mass}. Default
+#'   \code{"ug"} (micrograms). Existing calls without this argument are
+#'   unaffected.
+#' @param to_area Target area unit. One of \code{"ha"}, \code{"m2"}.
+#'   Default \code{"m2"}.
+#' @param to_time Target time unit. Same options as \code{time}. Default
+#'   \code{"hr"}.
 #' @param digits Number of decimal places to round to. Default 2.
 #' @param ratio Logical. If \code{TRUE}, apply an elemental-ratio correction
 #'   (C-basis for CH4, N-basis for N2O). Default \code{FALSE}.
-#' @return A named list with \code{value} (converted string) and \code{unit},
-#'   or \code{"EMPTY"} for missing/non-numeric input.
+#' @return For numeric input: a numeric vector of converted values.
+#'   For character input: a character vector with numbers converted in-place
+#'   (e.g. \code{"0.002 +/- 0.003"} becomes \code{"0.03 +/- 0.05"}).
+#'   Returns \code{NA} for missing input.
 #' @examples
 #' convert_ghg_unit(97, ghg = "ch4", mass = "mg", area = "m2", time = "hr")
 #' @export
 convert_ghg_unit <- function(input, ghg, mass = "\u00b5g", area = "m2",
-                             time = "hr", digits = 2, ratio = FALSE) {
-  if (is.na(input) || input == "") return("EMPTY")
+                             time = "hr", to_mass = "µg", to_area = "m2",
+                             to_time = "hr", digits = 2, ratio = FALSE) {
+  valid_masses <- c("mmol", "mg", "g", "\u00b5g", "nmol", "Mg", "\u00b5mol", "mol")
+  valid_areas  <- c("ha", "m2")
+  valid_times  <- c("yr", "day", "hr", "sec", "min")
 
-  input <- gsub(",", ".", as.character(input))
-
-  numeric_values <- unlist(regmatches(input,
-    gregexpr("[-+]?[0-9]*\\.?[0-9]+", input)))
-
-  if (length(numeric_values) == 0) return("EMPTY")
-
-  valid_ghgs <- c("co2", "ch4", "n2o")
   molar_mass <- switch(ghg,
     "co2" = 44.01, "ch4" = 16.04, "n2o" = 44.01,
-    stop(paste("Invalid GHG type. Please use one of:",
-               paste(valid_ghgs, collapse = ", "))))
+    stop(paste("Invalid ghg. One of: co2, ch4, n2o")))
+  if (!(mass    %in% valid_masses)) stop(paste("Invalid mass. One of:",    paste(valid_masses, collapse = ", ")))
+  if (!(area    %in% valid_areas))  stop(paste("Invalid area. One of:",    paste(valid_areas,  collapse = ", ")))
+  if (!(time    %in% valid_times))  stop(paste("Invalid time. One of:",    paste(valid_times,  collapse = ", ")))
+  if (!(to_mass %in% valid_masses)) stop(paste("Invalid to_mass. One of:", paste(valid_masses, collapse = ", ")))
+  if (!(to_area %in% valid_areas))  stop(paste("Invalid to_area. One of:", paste(valid_areas,  collapse = ", ")))
+  if (!(to_time %in% valid_times))  stop(paste("Invalid to_time. One of:", paste(valid_times,  collapse = ", ")))
 
-  valid_masses <- c("mmol", "mg", "g", "\u00b5g", "nmol", "Mg", "\u00b5mol", "mol")
-  if (!(mass %in% valid_masses))
-    stop(paste("Invalid mass unit. Please use one of:",
-               paste(valid_masses, collapse = ", ")))
+  # Vectorize \u2014 validation runs once here, not once per element
+  if (length(input) > 1) {
+    fn <- if (is.numeric(input)) numeric(1) else character(1)
+    return(vapply(input, convert_ghg_unit, FUN.VALUE = fn,
+                  ghg = ghg, mass = mass, area = area, time = time,
+                  to_mass = to_mass, to_area = to_area, to_time = to_time,
+                  digits = digits, ratio = ratio))
+  }
 
-  valid_areas <- c("ha", "m2")
-  if (!(area %in% valid_areas))
-    stop(paste("Invalid area unit. Please use one of:",
-               paste(valid_areas, collapse = ", ")))
-
-  valid_times <- c("yr", "day", "hr", "sec", "min")
-  if (!(time %in% valid_times))
-    stop(paste("Invalid time unit. Please use one of:",
-               paste(valid_times, collapse = ", ")))
+  if (is.na(input)) return(if (is.character(input)) NA_character_ else NA_real_)
 
   convert_value <- function(value) {
     # Convert mass to µg
@@ -902,15 +908,45 @@ convert_ghg_unit <- function(input, ghg, mass = "\u00b5g", area = "m2",
       if (ghg == "ch4") value <- value * (16.04 / 12.01)
       if (ghg == "n2o") value <- value * (44.013 / 14.0067)
     }
+    # Step 2: µg m⁻² h⁻¹ → target units
+    # Defaults (µg, m2, hr) are all identity — existing calls unchanged
+    value <- switch(to_mass,
+      "mmol"      = value / (molar_mass * 1000),
+      "mg"        = value / 1000,
+      "g"         = value / 1000000,
+      "µg"        = value,
+      "nmol"      = value * 1000 / molar_mass,
+      "Mg"        = value / 1e12,
+      "µmol"      = value / molar_mass,
+      "mol"       = value / (molar_mass * 1000000)
+    )
+    if (to_area == "ha") value <- value * 10000
+    value <- switch(to_time,
+      "yr"  = value * 8760,
+      "day" = value * 24,
+      "sec" = value / 3600,
+      "min" = value / 60,
+      "hr"  = value
+    )
     round(value, digits)
   }
+
+  # Numeric scalar: convert directly, return numeric
+  if (is.numeric(input)) return(convert_value(input))
+
+  # Character input: convert numbers in-place, return modified string
+  if (input == "") return(NA_character_)
+  input <- gsub(",", ".", as.character(input))
+  numeric_values <- unlist(regmatches(input,
+    gregexpr("[-+]?[0-9]*\\.?[0-9]+", input)))
+  if (length(numeric_values) == 0) return(NA_character_)
 
   for (num in numeric_values) {
     converted_num <- convert_value(as.numeric(num))
     input <- gsub(paste0("\\b", num, "\\b"), as.character(converted_num), input)
   }
 
-  list(value = input, unit = "\u00b5g m\u207b\u00b2 h\u207b\u00b9")
+  input
 }
 
 

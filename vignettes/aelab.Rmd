@@ -210,13 +210,24 @@ calculate_ghg_flux(flux_ch4)
 
 ### `convert_ghg_unit()`
 
-`convert_ghg_unit()` converts a GHG flux value to µg m⁻² h⁻¹. The input can be a plain number or a character string containing embedded numbers (e.g., a mean ± SD string); each number in the string is converted individually.
+`convert_ghg_unit()` converts a GHG flux value between any supported flux units. The default output is µg m⁻² h⁻¹, but the target unit is fully configurable via `to_mass`, `to_area`, and `to_time`. The function is vectorized over numeric columns and works directly inside `dplyr::mutate()`.
+
+- **Numeric input** (scalar or vector): returns a numeric value/vector.
+- **Character string input** (e.g., mean ± SD notation): converts each embedded number in-place and returns the modified string. Works in `dplyr::mutate()` for character columns.
+- **`NA` input**: returns `NA` without error.
 
 ```{r}
-# Numeric input: 97 mg CH4 m-2 h-1 → µg m-2 h-1
+# Numeric input: 97 mg CH4 m-2 h-1 → µg m-2 h-1 (default target)
 convert_ghg_unit(97, ghg = "ch4", mass = "mg", area = "m2", time = "hr")
 
-# Character string input: each number is converted individually
+# Numeric vector: works directly in dplyr::mutate()
+convert_ghg_unit(c(1.2, 0.8, NA), ghg = "ch4", mass = "µmol", area = "m2", time = "hr")
+
+# Custom target unit: µmol m-2 h-1 → mmol m-2 d-1
+convert_ghg_unit(97, ghg = "ch4", mass = "µmol", area = "m2", time = "hr",
+                 to_mass = "mmol", to_area = "m2", to_time = "day")
+
+# Character string input: each number is converted individually, string is preserved
 convert_ghg_unit("0.002 ± 0.003", ghg = "ch4", mass = "mmol", area = "m2", time = "hr")
 ```
 

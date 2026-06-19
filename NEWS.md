@@ -103,7 +103,7 @@
 
 ## Modified functions
 
-* `convert_ghg_unit()` — now accepts character strings (e.g. "0.002 ± 0.003") and converts each embedded number; supports wider unit set (`nmol`, `Mg`, `µmol`, `mol`; time: `yr`, `day`, `hr`, `sec`, `min`); returns a named list `list(value, unit)` instead of a bare numeric.
+* `convert_ghg_unit()` — vectorized over numeric and character vectors (works directly in `dplyr::mutate()`); added `to_mass`, `to_area`, `to_time` parameters for configurable output unit (default remains µg m⁻² h⁻¹); numeric input now returns numeric (not a list); character string input returns the converted string directly (not `list(value, unit)`); `NA` input returns `NA` without error.
 
 # aelab 0.4.0
 

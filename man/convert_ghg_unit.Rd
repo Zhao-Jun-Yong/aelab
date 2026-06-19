@@ -10,13 +10,17 @@ convert_ghg_unit(
   mass = "µg",
   area = "m2",
   time = "hr",
+  to_mass = "µg",
+  to_area = "m2",
+  to_time = "hr",
   digits = 2,
   ratio = FALSE
 )
 }
 \arguments{
-\item{input}{A single numeric value or a character string containing one or
-more numbers.}
+\item{input}{A numeric vector or a character string containing one or more
+numbers. Numeric vectors are handled element-wise, making the function
+compatible with \code{dplyr::mutate()}.}
 
 \item{ghg}{The molecular formula of the greenhouse gas: \code{"co2"},
 \code{"ch4"}, or \code{"n2o"}.}
@@ -31,19 +35,31 @@ Default \code{"m2"}.}
 \item{time}{Time unit of the input flux. One of \code{"yr"}, \code{"day"},
 \code{"hr"}, \code{"sec"}, \code{"min"}. Default \code{"hr"}.}
 
+\item{to_mass}{Target mass unit. Same options as \code{mass}. Default
+\code{"ug"} (micrograms). Existing calls without this argument are
+unaffected.}
+
+\item{to_area}{Target area unit. One of \code{"ha"}, \code{"m2"}.
+Default \code{"m2"}.}
+
+\item{to_time}{Target time unit. Same options as \code{time}. Default
+\code{"hr"}.}
+
 \item{digits}{Number of decimal places to round to. Default 2.}
 
 \item{ratio}{Logical. If \code{TRUE}, apply an elemental-ratio correction
 (C-basis for CH4, N-basis for N2O). Default \code{FALSE}.}
 }
 \value{
-A named list with \code{value} (converted string) and \code{unit},
-  or \code{"EMPTY"} for missing/non-numeric input.
+For numeric input: a numeric vector of converted values.
+  For character input: a character vector with numbers converted in-place
+  (e.g. \code{"0.002 +/- 0.003"} becomes \code{"0.03 +/- 0.05"}).
+  Returns \code{NA} for missing input.
 }
 \description{
 Convert a greenhouse gas (GHG) flux value (or a character string
   containing one or more numeric values, e.g. \code{"0.002 +/- 0.003"})
-  to micrograms per square meter per hour.
+  between flux units. Defaults to micrograms per square meter per hour.
 }
 \details{
 Numeric values embedded in a string (e.g. mean +/- SD notation)

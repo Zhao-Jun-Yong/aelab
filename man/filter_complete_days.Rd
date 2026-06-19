@@ -46,7 +46,7 @@ Keep only the calendar days that have (near-)complete diel
 \examples{
 \dontrun{
 hobo <- combine_hobo("data/raw/sw_mono_do/csv/FL_T1")
-filter_complete_days(hobo, summary_only = TRUE)   # inspect coverage
-clean <- filter_complete_days(hobo)               # keep complete days
+filter_complete_days(hobo, summary_only = TRUE) # inspect coverage
+clean <- filter_complete_days(hobo) # keep complete days
 }
 }
