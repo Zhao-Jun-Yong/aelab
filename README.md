@@ -6,6 +6,7 @@
 2. **Net ecosystem metabolism (NEM)** — calculate gross primary production (GPP), ecosystem respiration (ER), and net ecosystem production (NEP) from high-frequency dissolved oxygen data.
 3. **Statistical analysis** — descriptive statistics, outlier detection, normality testing, data transformation, one-way ANOVA (Tukey HSD), and Kruskal-Wallis (Dunn post-hoc) with compact letter display.
 4. **Visualization** — ggplot2-based plot wrappers (point, line, box, bar) with a consistent theme and custom colour palettes.
+5. **Gantt-style progress tables** — `gantt_table()` renders a coloured `flextable` (PDF/DOCX/PPTX-compatible) where columns are sampling campaigns and rows are measurement categories × systems; `gantt_text()` renders the same data as Unicode text for terminal/Neovim viewing.
 
 ## GHG Flux — What's New (v1.1.5)
 

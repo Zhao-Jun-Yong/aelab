@@ -11,7 +11,8 @@ Description: Facilitate the analysis of data related to aquatic ecology, specifi
   Yong et al. (2024) <doi:10.5194/bg-21-5247-2024>.
   Staehr et al. (2010) <doi:10.4319/lom.2010.8.0628>.
 Imports: tibble, lubridate, stats, dplyr, openxlsx, readxl, ggplot2, readr, tidyr, stringr, purrr,
-    rlang, grDevices, multcompView, FSA, rcompanion, rnaturalearth, sf, ggspatial
+    rlang, grDevices, multcompView, FSA, rcompanion, rnaturalearth, sf, ggspatial,
+    flextable, officer
 License: GPL (>= 3)
 Encoding: UTF-8
 RoxygenNote: 7.2.3

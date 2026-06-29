@@ -2,6 +2,8 @@
 
 ## New functions
 
+* `gantt_table()` — creates a coloured `flextable` Gantt-style progress table where columns are sampling campaigns and rows are measurement categories × systems. Supports sampling schedules (cells = dates) and processing-progress tables (cells = sample counts). Key parameters: `colors` (named hex fill per system), `system_labels` (short display labels), `done_cols` (campaigns completed — cells in done columns get system fill; others with values get white), `na_color` (fill for empty cells; default `"#BFBFBF"` grey for "no sampling", use `"white"` for "not yet processed"). Footer notes via `notes`. Output works across PDF (xelatex), DOCX, and PPTX via `officer`.
+* `gantt_text()` — plain-text Unicode Gantt for terminal and Neovim. Same data contract as `gantt_table()`. Done cells show the value; planned-but-not-done cells are wrapped in parentheses `(value)`; empty cells show `----`.
 * `process_weather_mh()` / `combine_weather_mh()` — import the CWA "MH"
   (Multifield Hourly) bulk weather report downloaded from the CODiS portal
   (`LotsDataReports.txt`). Maps `PS01` -> `pressure_hpa` and `WD01` -> `wind_ms`
