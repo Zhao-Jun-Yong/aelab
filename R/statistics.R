@@ -1,40 +1,76 @@
 utils::globalVariables(c("cur_column"))
 
+# ponytail: n_valid == 0 -> NA_character_ (no Inf/NaN); n_valid == 1 -> SD left
+# as NA rather than 0.
+descriptive_mean_sd <- function(x, digits) {
+  n_valid <- sum(!is.na(x))
+  if (n_valid == 0) return(NA_character_)
+  sd_val <- if (n_valid == 1) NA_real_ else stats::sd(x, na.rm = TRUE)
+  paste(
+    sprintf(paste0("%.", digits, "f"), mean(x, na.rm = TRUE)),
+    sprintf(paste0("%.", digits, "f"), sd_val),
+    sep = " \u00B1 "
+  )
+}
+
+descriptive_min_max <- function(x, digits) {
+  if (all(is.na(x))) return(NA_character_)
+  paste(
+    sprintf(paste0("%.", digits, "f"), min(x, na.rm = TRUE)),
+    sprintf(paste0("%.", digits, "f"), max(x, na.rm = TRUE)),
+    sep = " to "
+  )
+}
+
 #' @title descriptive_statistic
-#' @description Compute grouped mean ± SD and min–max summary statistics for
+#' @description Compute grouped mean \eqn{\pm} SD and min-max summary statistics for
 #'   one or more numeric variables.
 #' @param data A data frame.
 #' @param vars <[`tidy-select`][dplyr::dplyr_tidy_select]> Columns to summarise.
+#'   All selected columns must be numeric.
 #' @param groups <[`tidy-select`][dplyr::dplyr_tidy_select]> Grouping columns.
-#' @param digits Number of decimal places to round to. Default is 2.
+#'   Their original classes (e.g. factor, Date) are preserved.
+#' @param digits Number of decimal places to round to. Must be a single
+#'   non-negative integer. Default is 2.
 #' @return A tibble with one row per group and two summary columns per variable
-#'   (`<var>_mean_sd` and `<var>_min_max`).
+#'   (`<var>_mean_sd` and `<var>_min_max`). A group with no non-missing values
+#'   returns `NA` for both columns instead of `NaN`/`Inf`. A group with exactly
+#'   one non-missing value reports `NA` for the SD rather than `0`.
 #' @examples
-#' df <- data.frame(group = c("A","A","B","B"), value = c(1.1, 2.3, 3.5, 4.7))
+#' df <- data.frame(
+#'   group = c("A", "A", "B", "B", "C"),
+#'   value = c(1.1, 2.3, 3.5, 4.7, NA)
+#' )
 #' descriptive_statistic(df, vars = value, groups = group)
-#' @importFrom dplyr group_by summarise across
+#' @importFrom dplyr select summarise across
 #' @export
 descriptive_statistic <- function(data, vars, groups, digits = 2) {
-  data |>
-    dplyr::group_by(dplyr::across({{ groups }}, as.character)) |>
-    dplyr::summarise(
-      dplyr::across(
-        {{ vars }},
-        .fns = list(
-          mean_sd = ~ paste(
-            format(round(mean(., na.rm = TRUE), digits), scientific = FALSE),
-            format(round(sd(., na.rm = TRUE), digits), scientific = FALSE),
-            sep = " \u00B1 "
-          ),
-          min_max = ~ paste(
-            format(round(min(., na.rm = TRUE), digits), scientific = FALSE),
-            format(round(max(., na.rm = TRUE), digits), scientific = FALSE),
-            sep = " to "
-          )
-        )
-      ),
-      .groups = "drop"
+  if (!is.numeric(digits) || length(digits) != 1L || is.na(digits) ||
+        digits < 0 || digits != round(digits)) {
+    stop("`digits` must be a single non-negative integer.", call. = FALSE)
+  }
+
+  selected    <- dplyr::select(data, {{ vars }})
+  non_numeric <- names(selected)[!vapply(selected, is.numeric, logical(1))]
+  if (length(non_numeric) > 0) {
+    stop(
+      "`vars` must be numeric. Non-numeric column(s): ",
+      paste(non_numeric, collapse = ", "),
+      call. = FALSE
     )
+  }
+
+  dplyr::summarise(
+    data,
+    dplyr::across(
+      {{ vars }},
+      list(
+        mean_sd = \(x) descriptive_mean_sd(x, digits),
+        min_max = \(x) descriptive_min_max(x, digits)
+      )
+    ),
+    .by = {{ groups }}
+  )
 }
 
 
@@ -46,7 +82,7 @@ descriptive_statistic <- function(data, vars, groups, digits = 2) {
 #' @param group <[`data-masking`][dplyr::dplyr_data_masking]> The grouping column.
 #' @param group_1 Value identifying the first group.
 #' @param group_2 Value identifying the second group.
-#' @return A tibble with Shapiro-Wilk p-values for each group × transformation
+#' @return A tibble with Shapiro-Wilk p-values for each group \eqn{\times} transformation
 #'   combination.
 #' @examples
 #' df <- data.frame(
@@ -183,7 +219,7 @@ aov_test <- function(df, variable_name, group) {
 #' )
 #' ks_test(df, "val", "grp")
 #' @importFrom stats kruskal.test as.formula
-#' @importFrom dplyr group_by summarise
+#' @importFrom dplyr summarise all_of
 #' @importFrom rlang sym !!
 #' @importFrom FSA dunnTest
 #' @importFrom rcompanion cldList
@@ -227,10 +263,11 @@ ks_test <- function(df, variable_name, group) {
     dunn_results$Comparison
   )
 
-  mean_summary <- df |>
-    dplyr::group_by(!!rlang::sym(group)) |>
-    dplyr::summarise(mean = mean(!!rlang::sym(variable_name), na.rm = TRUE),
-                     .groups = "drop")
+  mean_summary <- dplyr::summarise(
+    df,
+    mean = mean(!!rlang::sym(variable_name), na.rm = TRUE),
+    .by = dplyr::all_of(group)
+  )
 
   list(
     ks_results      = ks_results,

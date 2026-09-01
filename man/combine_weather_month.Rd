@@ -10,7 +10,7 @@ combine_weather_month(file_path, start_month, end_month, year = 2024, zone)
 \item{file_path}{Path prefix (directory + filename prefix before the date
 portion, e.g. \code{"data/weather/"}).}
 
-\item{start_month}{First month to import (1–9; two-digit months not yet
+\item{start_month}{First month to import (1-9; two-digit months not yet
 supported).}
 
 \item{end_month}{Last month to import.}

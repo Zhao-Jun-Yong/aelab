@@ -9,21 +9,29 @@ descriptive_statistic(data, vars, groups, digits = 2)
 \arguments{
 \item{data}{A data frame.}
 
-\item{vars}{<[`tidy-select`][dplyr::dplyr_tidy_select]> Columns to summarise.}
+\item{vars}{<[`tidy-select`][dplyr::dplyr_tidy_select]> Columns to summarise.
+All selected columns must be numeric.}
 
-\item{groups}{<[`tidy-select`][dplyr::dplyr_tidy_select]> Grouping columns.}
+\item{groups}{<[`tidy-select`][dplyr::dplyr_tidy_select]> Grouping columns.
+Their original classes (e.g. factor, Date) are preserved.}
 
-\item{digits}{Number of decimal places to round to. Default is 2.}
+\item{digits}{Number of decimal places to round to. Must be a single
+non-negative integer. Default is 2.}
 }
 \value{
 A tibble with one row per group and two summary columns per variable
-  (`<var>_mean_sd` and `<var>_min_max`).
+  (`<var>_mean_sd` and `<var>_min_max`). A group with no non-missing values
+  returns `NA` for both columns instead of `NaN`/`Inf`. A group with exactly
+  one non-missing value reports `NA` for the SD rather than `0`.
 }
 \description{
-Compute grouped mean ± SD and min–max summary statistics for
+Compute grouped mean \eqn{\pm} SD and min-max summary statistics for
   one or more numeric variables.
 }
 \examples{
-df <- data.frame(group = c("A","A","B","B"), value = c(1.1, 2.3, 3.5, 4.7))
+df <- data.frame(
+  group = c("A", "A", "B", "B", "C"),
+  value = c(1.1, 2.3, 3.5, 4.7, NA)
+)
 descriptive_statistic(df, vars = value, groups = group)
 }

@@ -49,16 +49,16 @@ specific measurement. This allows different window lengths for individual chambe
 \code{"quadratic"} (second-order polynomial; slope is the initial rate at t=0),
 \code{"exp_tz"} (exponential with linear drift and user-specified \code{t_zero}),
 \code{"exp_zhao18"} (exponential with linear drift and estimated t0), or
-\code{"auto"} (automatic model selection: tries linear → quadratic → exp_tz in order,
-accepting a more complex model only when R² improves by > 0.01 and, for exp_tz, the
-curvature parameter κ does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
+\code{"auto"} (automatic model selection: tries linear -> quadratic -> exp_tz in order,
+accepting a more complex model only when R\eqn{^2} improves by > 0.01 and, for exp_tz, the
+curvature parameter kappa does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
 \code{instrument_precision = NULL}, precision is looked up from \code{\link{analyzer_precision}}
 by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.}
 
 \item{t_zero}{Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.}
 
 \item{window_type}{\code{"sliding"} (default) selects the \code{num_rows}-length sub-window with
-the best R² within the measurement period. \code{"fixed"} fits a single window starting at
+the best R\eqn{^2} within the measurement period. \code{"fixed"} fits a single window starting at
 \code{start_offset_s} seconds after the reference time and running for \code{duration_minutes}.
 Use \code{"fixed"} to ensure all gases are regressed over the same time window.}
 
@@ -73,16 +73,16 @@ When \code{reference_df} contains a \code{start_offset_s} column, the per-row va
 Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.}
 
 \item{instrument_precision}{Optional. Analyser precision in ppm. Used in two ways:
-(1) minimum-detectable-slope check — measurements whose absolute slope falls below
-\code{instrument_precision / window_duration_s} are flagged \code{"zero"} even if R²
-and correlation pass; (2) kappamax for \code{fit_type = "auto"} — following Hüppi et al.
+(1) minimum-detectable-slope check - measurements whose absolute slope falls below
+\code{instrument_precision / window_duration_s} are flagged \code{"zero"} even if R\eqn{^2}
+and correlation pass; (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
 (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
 fluxes permit more curvature and near-detection-limit measurements are kept linear.}
 
 \item{kappamax}{Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
 Only applies when \code{fit_type} is \code{"exp_tz"} or \code{"exp_zhao18"}. When \eqn{b > \kappa_{max}},
 the fit implies an implausibly fast equilibration and the slope is replaced by the linear
-equivalent. Corresponds to the \emph{kappamax} quality criterion in Hüppi et al. (2018).}
+equivalent. Corresponds to the \emph{kappamax} quality criterion in Hueppi et al. (2018).}
 
 \item{g_factor_threshold}{Optional. Maximum acceptable ratio of the chosen model slope to the
 linear baseline slope (g-factor; Gaudard et al. 2025). Only computed when

@@ -31,7 +31,7 @@ plot_ghg_flux(
 }
 \value{
 A \code{ggplot} object with one facet per site. Each panel shows raw concentration
-  points and the fitted line, with strip text showing slope, R², and flag.
+  points and the fitted line, with strip text showing slope, R\eqn{^2}, and flag.
 }
 \description{
 Plot GHG concentration over time for each measurement window, overlaid with the

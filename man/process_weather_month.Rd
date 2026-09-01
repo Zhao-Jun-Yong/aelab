@@ -9,7 +9,7 @@ process_weather_month(file_path, month, year = 2024, zone)
 \arguments{
 \item{file_path}{Path to the monthly CSV file.}
 
-\item{month}{Month number (1–12) covered by the file.}
+\item{month}{Month number (1-12) covered by the file.}
 
 \item{year}{Four-digit year. Default 2024.}
 

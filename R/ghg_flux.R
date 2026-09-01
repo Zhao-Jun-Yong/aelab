@@ -1,4 +1,4 @@
-utils::globalVariables(c("CO2", "CH4", "N2O"))
+utils::globalVariables(c("CO2", "CH4", "N2O", "conc", "analyzer_precision"))
 
 #' @title tidy_ghg_analyzer
 #' @importFrom lubridate ymd_hms days hours minutes seconds force_tz
@@ -116,10 +116,10 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 
 }
 
-# Internal helper: fit a GHG concentration curve and return slope, R², curvature b, and fit_used.
+# Internal helper: fit a GHG concentration curve and return slope, R\u00b2, curvature b, and fit_used.
 # kappamax:            if provided and b > kappamax, exponential fits fall back to linear.
 # instrument_precision: only used when fit_type = "auto" to compute kappamax per window
-#                       using the Hüppi et al. (2018) formula: kmax = |slope_lm| / precision.
+#                       using the H\u00fcppi et al. (2018) formula: kmax = |slope_lm| / precision.
 .fit_ghg_model <- function(conc, elapsed_s, fit_type, t_zero,
                            kappamax = NULL, instrument_precision = NULL) {
   C0     <- conc[1]
@@ -207,21 +207,21 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
     best     <- .lm_result()
     lm_slope <- best$slope  # saved for g-factor computation
 
-    # kappamax (Hüppi et al. 2018): reject exp_tz if b > |slope_lm| / precision.
+    # kappamax (H\u00fcppi et al. 2018): reject exp_tz if b > |slope_lm| / precision.
     # Strong fluxes tolerate more curvature; near-detection-limit measurements stay linear.
     kmax <- if (!is.null(instrument_precision) && !is.na(best$slope) && abs(best$slope) > 0)
       abs(best$slope) / instrument_precision
     else
       1.5 / max(duration_s, 1)
 
-    # Step 2: quadratic — accept if meaningfully better (ΔR² > 0.01)
+    # Step 2: quadratic \u2014 accept if meaningfully better (\u0394R\u00b2 > 0.01)
     quad <- .quad_result()
     if (!is.na(quad$r_square) && !is.na(best$r_square) &&
         quad$r_square > best$r_square + 0.01) {
       best <- quad
     }
 
-    # Step 3: exp_tz with kappamax — accept if κ passes and meaningfully better
+    # Step 3: exp_tz with kappamax \u2014 accept if \u03ba passes and meaningfully better
     exp_res <- .exp_tz_result(kmax)
     if (!is.null(exp_res) && !is.na(exp_res$r_square) && !is.na(best$r_square) &&
         exp_res$r_square > best$r_square + 0.01) {
@@ -258,14 +258,14 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   \code{"quadratic"} (second-order polynomial; slope is the initial rate at t=0),
 #'   \code{"exp_tz"} (exponential with linear drift and user-specified \code{t_zero}),
 #'   \code{"exp_zhao18"} (exponential with linear drift and estimated t0), or
-#'   \code{"auto"} (automatic model selection: tries linear → quadratic → exp_tz in order,
-#'   accepting a more complex model only when R² improves by > 0.01 and, for exp_tz, the
-#'   curvature parameter κ does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
+#'   \code{"auto"} (automatic model selection: tries linear -> quadratic -> exp_tz in order,
+#'   accepting a more complex model only when R\eqn{^2} improves by > 0.01 and, for exp_tz, the
+#'   curvature parameter kappa does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
 #'   \code{instrument_precision = NULL}, precision is looked up from \code{\link{analyzer_precision}}
 #'   by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.
 #' @param t_zero Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.
 #' @param window_type \code{"sliding"} (default) selects the \code{num_rows}-length sub-window with
-#'   the best R² within the measurement period. \code{"fixed"} fits a single window starting at
+#'   the best R\eqn{^2} within the measurement period. \code{"fixed"} fits a single window starting at
 #'   \code{start_offset_s} seconds after the reference time and running for \code{duration_minutes}.
 #'   Use \code{"fixed"} to ensure all gases are regressed over the same time window.
 #' @param start_offset_s Seconds to skip from the reference time before the regression window starts.
@@ -276,15 +276,15 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' @param cor_threshold Minimum absolute Pearson correlation between concentration and elapsed time.
 #'   Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.
 #' @param instrument_precision Optional. Analyser precision in ppm. Used in two ways:
-#'   (1) minimum-detectable-slope check — measurements whose absolute slope falls below
-#'   \code{instrument_precision / window_duration_s} are flagged \code{"zero"} even if R²
-#'   and correlation pass; (2) kappamax for \code{fit_type = "auto"} — following Hüppi et al.
+#'   (1) minimum-detectable-slope check - measurements whose absolute slope falls below
+#'   \code{instrument_precision / window_duration_s} are flagged \code{"zero"} even if R\eqn{^2}
+#'   and correlation pass; (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
 #'   (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
 #'   fluxes permit more curvature and near-detection-limit measurements are kept linear.
 #' @param kappamax Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
 #'   Only applies when \code{fit_type} is \code{"exp_tz"} or \code{"exp_zhao18"}. When \eqn{b > \kappa_{max}},
 #'   the fit implies an implausibly fast equilibration and the slope is replaced by the linear
-#'   equivalent. Corresponds to the \emph{kappamax} quality criterion in Hüppi et al. (2018).
+#'   equivalent. Corresponds to the \emph{kappamax} quality criterion in Hueppi et al. (2018).
 #' @param g_factor_threshold Optional. Maximum acceptable ratio of the chosen model slope to the
 #'   linear baseline slope (g-factor; Gaudard et al. 2025). Only computed when
 #'   \code{fit_type = "auto"} and the selected model is not linear. Values far from 1 indicate
@@ -492,7 +492,7 @@ calculate_regression <- function(data, reference_df, ghg,
 #'
 #'   The first three columns are positional (required). Optional per-row window overrides
 #'   use \code{key=value} syntax in any order: \code{dur=} sets \code{duration_minutes},
-#'   \code{off=} sets \code{start_offset_s}. Rows without an override simply omit the token —
+#'   \code{off=} sets \code{start_offset_s}. Rows without an override simply omit the token -
 #'   no \code{NA} placeholder needed.
 #' @param date Sampling date applied to all rows. A single \code{"YYYY-MM-DD"} string or
 #'   \code{Date}. For multi-day campaigns, supply a character/Date vector with one value per row.
@@ -516,7 +516,7 @@ calculate_regression <- function(data, reference_df, ghg,
 #'   "
 #' )
 #'
-#' # per-row window overrides — no NA placeholders needed
+#' # per-row window overrides - no NA placeholders needed
 #' make_reference(
 #'   date = "2026-05-22",
 #'   measurements = "
@@ -619,7 +619,7 @@ make_reference <- function(date,
 #' @param t_zero Reference time in seconds for \code{"exp_tz"} slope. Default 0.
 #' @param flag_colors Named character vector mapping flag values to colors.
 #' @return A \code{ggplot} object with one facet per site. Each panel shows raw concentration
-#'   points and the fitted line, with strip text showing slope, R², and flag.
+#'   points and the fitted line, with strip text showing slope, R\eqn{^2}, and flag.
 #' @examples
 #' data(n2o)
 #' n2o_converted <- convert_time(n2o)
@@ -664,7 +664,7 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 
     slope_label <- if (!is.na(row$slope))    formatC(row$slope,    digits = 5, format = "g") else "NA"
     r2_label    <- if (!is.na(row$r_square)) round(row$r_square, 3)                          else "NA"
-    site_label  <- paste0(site, "\nslope=", slope_label, "  R²=", r2_label, "  [", flag, "]")
+    site_label  <- paste0(site, "\nslope=", slope_label, "  R\u00b2=", r2_label, "  [", flag, "]")
 
     empty_win <- data.frame(site_label = character(0), elapsed_s = numeric(0),
                             conc = numeric(0), flag = character(0),
@@ -745,7 +745,7 @@ plot_ghg_flux <- function(data, regression_result, ghg,
     flag       <- row$flag
     slope_lbl  <- if (!is.na(row$slope))    formatC(row$slope,    digits = 5, format = "g") else "NA"
     r2_lbl     <- if (!is.na(row$r_square)) round(row$r_square, 3)                          else "NA"
-    paste0(site, "\nslope=", slope_lbl, "  R²=", r2_lbl, "  [", flag, "]")
+    paste0(site, "\nslope=", slope_lbl, "  R\u00b2=", r2_lbl, "  [", flag, "]")
   }, character(1))
 
   all_windows$site_label <- factor(all_windows$site_label, levels = unique(site_label_order))
@@ -790,8 +790,8 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "volume", temp = "temp") {
 
   # Constants
-  s_to_hr <- (1/3600)  # seconds to hours (3600 s h⁻¹)
-  gas_constant <- 0.082057  # gas constant (L·atm·K⁻¹·mol⁻¹)
+  s_to_hr <- (1/3600)  # seconds to hours (3600 s h\u207b\u00b9)
+  gas_constant <- 0.082057  # gas constant (L\u00b7atm\u00b7K\u207b\u00b9\u00b7mol\u207b\u00b9)
   celsius_to_kelvin <- 273.15  # Celsius to Kelvin conversion
   micro_to_milli <- 0.001  # micromoles to millimoles conversion
 
@@ -854,7 +854,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 #' convert_ghg_unit(97, ghg = "ch4", mass = "mg", area = "m2", time = "hr")
 #' @export
 convert_ghg_unit <- function(input, ghg, mass = "\u00b5g", area = "m2",
-                             time = "hr", to_mass = "µg", to_area = "m2",
+                             time = "hr", to_mass = "\u00b5g", to_area = "m2",
                              to_time = "hr", digits = 2, ratio = FALSE) {
   valid_masses <- c("mmol", "mg", "g", "\u00b5g", "nmol", "Mg", "\u00b5mol", "mol")
   valid_areas  <- c("ha", "m2")
@@ -882,7 +882,7 @@ convert_ghg_unit <- function(input, ghg, mass = "\u00b5g", area = "m2",
   if (is.na(input)) return(if (is.character(input)) NA_character_ else NA_real_)
 
   convert_value <- function(value) {
-    # Convert mass to µg
+    # Convert mass to \u00b5g
     value <- switch(mass,
       "mmol"      = value * molar_mass * 1000,
       "mg"        = value * 1000,
@@ -908,16 +908,16 @@ convert_ghg_unit <- function(input, ghg, mass = "\u00b5g", area = "m2",
       if (ghg == "ch4") value <- value * (16.04 / 12.01)
       if (ghg == "n2o") value <- value * (44.013 / 14.0067)
     }
-    # Step 2: µg m⁻² h⁻¹ → target units
-    # Defaults (µg, m2, hr) are all identity — existing calls unchanged
+    # Step 2: \u00b5g m\u207b\u00b2 h\u207b\u00b9 \u2192 target units
+    # Defaults (\u00b5g, m2, hr) are all identity \u2014 existing calls unchanged
     value <- switch(to_mass,
       "mmol"      = value / (molar_mass * 1000),
       "mg"        = value / 1000,
       "g"         = value / 1000000,
-      "µg"        = value,
+      "\u00b5g"        = value,
       "nmol"      = value * 1000 / molar_mass,
       "Mg"        = value / 1e12,
-      "µmol"      = value / molar_mass,
+      "\u00b5mol"      = value / molar_mass,
       "mol"       = value / (molar_mass * 1000000)
     )
     if (to_area == "ha") value <- value * 10000

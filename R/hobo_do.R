@@ -17,7 +17,7 @@ utils::globalVariables(c(
 #' @description Tidy data exported from a HOBO data logger. Supports the HOBO
 #'   U26 Dissolved Oxygen Data Logger (\code{type = "do"}) and the HOBO Pro v2
 #'   Temperature/RH Logger (\code{type = "temp"}). Handles both Chinese
-#'   (上午/下午) and English (AM/PM or 24-hour) HOBOware locale exports, with
+#'   (AM/PM Chinese-locale headers) and English (AM/PM or 24-hour) HOBOware locale exports, with
 #'   2- or 4-digit years. For \code{type = "do"}, readings with a negative
 #'   (sensor-error) dissolved-oxygen or temperature value are dropped before
 #'   aggregation.
@@ -47,13 +47,13 @@ process_hobo <- function(file_path, no_hobo, type = c("do", "temp")) {
   df <- as.data.frame(df)
   df <- stats::na.omit(df)
 
-  # Handle Chinese AM/PM locale export (上午 = morning, 下午 = afternoon)
-  if (any(grepl("上午|下午", df$date_time))) {
-    df$new_variable <- ifelse(grepl("上午", df$date_time), "morning", "afternoon")
-    df$date_time <- gsub("上午|下午", "", df$date_time)
-    df$date_time <- gsub("時", ":", df$date_time)
-    df$date_time <- gsub("分", ":", df$date_time)
-    df$date_time <- gsub("秒", "", df$date_time)
+  # Handle Chinese AM/PM locale export (\u4e0a\u5348 = morning, \u4e0b\u5348 = afternoon)
+  if (any(grepl("\u4e0a\u5348|\u4e0b\u5348", df$date_time))) {
+    df$new_variable <- ifelse(grepl("\u4e0a\u5348", df$date_time), "morning", "afternoon")
+    df$date_time <- gsub("\u4e0a\u5348|\u4e0b\u5348", "", df$date_time)
+    df$date_time <- gsub("\u6642", ":", df$date_time)
+    df$date_time <- gsub("\u5206", ":", df$date_time)
+    df$date_time <- gsub("\u79d2", "", df$date_time)
     df$date_time <- strptime(df$date_time, format = "%m/%d/%Y %H:%M:%S")
 
     subset_afternoon <- df[df$new_variable == "afternoon" &
@@ -136,9 +136,9 @@ process_weather <- function(file_path, date, zone) {
   df <- readr::read_csv(file_path)
 
   # Identify the columns for hours, pressure (hPa), and wind speed (m/s)
-  hours <- grep("觀測時間", names(df), ignore.case = F) # "觀測時間"
-  pressure_hpa <- grep("測站氣", names(df), ignore.case = F) # "測站氣"
-  wind_speed <- grep("風速", names(df), ignore.case = F) # "風速"
+  hours <- grep("\u89c0\u6e2c\u6642\u9593", names(df), ignore.case = F) # "\u89c0\u6e2c\u6642\u9593"
+  pressure_hpa <- grep("\u6e2c\u7ad9\u6c23", names(df), ignore.case = F) # "\u6e2c\u7ad9\u6c23"
+  wind_speed <- grep("\u98a8\u901f", names(df), ignore.case = F) # "\u98a8\u901f"
 
   # Duplicate the dataframe and remove unnecessary rows and columns
   df <- rbind(df, df) # Duplicate the dataframe
@@ -425,7 +425,7 @@ combine_hobo <- function(file_path, file_prefix = "no.") {
 #'   Taiwan Central Weather Administration station. Column selection is done via
 #'   regex so minor header changes are handled gracefully.
 #' @param file_path Path to the monthly CSV file.
-#' @param month Month number (1–12) covered by the file.
+#' @param month Month number (1-12) covered by the file.
 #' @param year Four-digit year. Default 2024.
 #' @param zone Character label for the weather station / region.
 #' @return A data frame with columns \code{day}, \code{pressure_hpa},
@@ -445,14 +445,14 @@ process_weather_month <- function(file_path, month, year = 2024, zone) {
   df <- readr::read_csv(file_path, show_col_types = FALSE)
 
   regex_patterns <- c(
-    day              = "^觀測時間", # 觀測時間
-    pressure_hpa     = "^測站氣壓", # 測站氣壓
-    temp             = "^氣溫", # 氣溫
-    humidity_percent = "^相對濕度", # 相對溼度
-    wind_ms          = "^風速", # 風速
-    rain_mm          = "^降水量", # 降水量
-    daylight_hr      = "^日照時數", # 日照時數
-    radiation        = "^全天空日射量" # 全天空日射量
+    day              = "^\u89c0\u6e2c\u6642\u9593", # \u89c0\u6e2c\u6642\u9593
+    pressure_hpa     = "^\u6e2c\u7ad9\u6c23\u58d3", # \u6e2c\u7ad9\u6c23\u58d3
+    temp             = "^\u6c23\u6eab", # \u6c23\u6eab
+    humidity_percent = "^\u76f8\u5c0d\u6fd5\u5ea6", # \u76f8\u5c0d\u6ebc\u5ea6
+    wind_ms          = "^\u98a8\u901f", # \u98a8\u901f
+    rain_mm          = "^\u964d\u6c34\u91cf", # \u964d\u6c34\u91cf
+    daylight_hr      = "^\u65e5\u7167\u6642\u6578", # \u65e5\u7167\u6642\u6578
+    radiation        = "^\u5168\u5929\u7a7a\u65e5\u5c04\u91cf" # \u5168\u5929\u7a7a\u65e5\u5c04\u91cf
   )
 
   selected_cols <- sapply(regex_patterns, function(pattern) {
@@ -486,7 +486,7 @@ process_weather_month <- function(file_path, month, year = 2024, zone) {
 #'   \code{<file_path><year>-0<month>.csv} (e.g. \code{2024-01.csv}).
 #' @param file_path Path prefix (directory + filename prefix before the date
 #'   portion, e.g. \code{"data/weather/"}).
-#' @param start_month First month to import (1–9; two-digit months not yet
+#' @param start_month First month to import (1-9; two-digit months not yet
 #'   supported).
 #' @param end_month Last month to import.
 #' @param year Four-digit year. Default 2024.
@@ -699,7 +699,7 @@ filter_complete_days <- function(df, group_cols = "no_hobo",
                                  time_col = "date_time", min_slots = 44L,
                                  tz = "Asia/Taipei", summary_only = FALSE) {
   if (!time_col %in% names(df)) stop("Column '", time_col, "' not found.")
-  n_slots <- complete <- NULL
+  n_slots <- complete <- slot_id <- NULL
 
   d <- dplyr::mutate(
     df,

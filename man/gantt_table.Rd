@@ -38,6 +38,6 @@ A \code{flextable} object.
 }
 \description{
 Creates a coloured \code{flextable} where columns are sampling campaigns and
-rows are measurement categories × systems. Works for both a sampling schedule
+rows are measurement categories by system. Works for both a sampling schedule
 (cells = dates) and a processing-progress table (cells = sample counts).
 }

@@ -244,11 +244,11 @@ test_that("calculate_ghg_flux uses 3600 s h-1 giving mmol m-2 h-1", {
 
 test_that("convert_ghg_unit converts correctly", {
   result <- convert_ghg_unit(1, "co2", mass = "mmol")
-  expect_equal(as.numeric(result$value), 44010, tolerance = 1)  # 1 mmol co2 = 44.01g/mol * 1000 µg/mg * 1000 = 44010 µg
+  expect_equal(result, 44010, tolerance = 1)  # 1 mmol co2 = 44.01g/mol * 1000 µg/mg * 1000 = 44010 µg
 })
 
 test_that("convert_ghg_unit throws error for invalid GHG", {
-  expect_error(convert_ghg_unit(1, "invalid_gas"), "Invalid GHG type")
+  expect_error(convert_ghg_unit(1, "invalid_gas"), "Invalid ghg")
 })
 
 test_that("g_factor is NA for explicit linear fit_type", {

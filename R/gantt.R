@@ -1,15 +1,15 @@
-# ── Gantt-style progress tables ───────────────────────────────────────────────
+# -- Gantt-style progress tables --------------------------------------------
 # Two renderers from the same data contract:
-#   gantt_table() → flextable (PDF / DOCX / PPTX via officer)
-#   gantt_text()  → Unicode text (terminal / Neovim)
+#   gantt_table() -> flextable (PDF / DOCX / PPTX via officer)
+#   gantt_text()  -> Unicode text (terminal / Neovim)
 #
 # Data contract (df):
 #   category | system | <campaign1> | <campaign2> | ...
 #
 # Cell coloring:
-#   NA / ""          → na_color (default grey = no sampling)
-#   value + done     → system fill color (completed)
-#   value + not done → white (planned, not yet done)
+#   NA / ""          -> na_color (default grey = no sampling)
+#   value + done     -> system fill color (completed)
+#   value + not done -> white (planned, not yet done)
 #   If done_cols is NULL, all values use system fill color.
 #
 # For processing-progress tables where NA means "not yet processed" (not
@@ -18,7 +18,7 @@
 #' Gantt-style coloured progress table
 #'
 #' Creates a coloured \code{flextable} where columns are sampling campaigns and
-#' rows are measurement categories × systems. Works for both a sampling schedule
+#' rows are measurement categories by system. Works for both a sampling schedule
 #' (cells = dates) and a processing-progress table (cells = sample counts).
 #'
 #' @param df Data frame with columns \code{category}, \code{system}, then one
@@ -57,7 +57,7 @@ gantt_table <- function(df, colors, system_labels = NULL,
   thick <- officer::fp_border(color = "#555555", width = 1.5)
 
   ft <- flextable::flextable(df_disp) |>
-    flextable::set_header_labels(category = "量測項目", system = "") |>
+    flextable::set_header_labels(category = "\u91cf\u6e2c\u9805\u76ee", system = "") |>
     flextable::merge_v(j = "category") |>
     flextable::valign(j = "category", valign = "center") |>
     flextable::bold(part = "header") |>
@@ -69,7 +69,7 @@ gantt_table <- function(df, colors, system_labels = NULL,
     flextable::border_outer(part = "all", border = thick) |>
     flextable::border_inner(part = "all", border = thin)
 
-  # ── Cell fill ──────────────────────────────────────────────────────────────
+  # -- Cell fill ---------------------------------------------------------------
   for (i in seq_len(nrow(df))) {
     sys  <- df$system[i]
     fill <- unname(colors[sys])
@@ -89,13 +89,13 @@ gantt_table <- function(df, colors, system_labels = NULL,
     }
   }
 
-  # ── Category group separators ──────────────────────────────────────────────
+  # -- Category group separators --------------------------------------------
   boundaries <- cumsum(rle(df$category)$lengths)
   boundaries <- boundaries[-length(boundaries)]
   if (length(boundaries) > 0)
     ft <- flextable::hline(ft, i = boundaries, border = thick)
 
-  # ── Column widths (fixed layout for cross-format consistency) ──────────────
+  # -- Column widths (fixed layout for cross-format consistency) --------------
   total_w <- 6.0
   cat_w   <- 1.4
   sys_w   <- 0.28
@@ -107,7 +107,7 @@ gantt_table <- function(df, colors, system_labels = NULL,
     flextable::width(j = "system",   width = sys_w) |>
     flextable::width(j = campaigns,  width = camp_w)
 
-  # ── Footer notes ───────────────────────────────────────────────────────────
+  # -- Footer notes -------------------------------------------------------------
   if (!is.null(notes)) {
     ft <- flextable::add_footer_lines(ft, notes) |>
       flextable::fontsize(part = "footer", size = 8) |>
@@ -137,14 +137,14 @@ gantt_text <- function(df, colors = NULL, system_labels = NULL,
 
   hdr_fmt <- paste0("%-18s %-6s", paste(rep(paste0(" %-", cw, "s"), length(campaigns)), collapse = ""))
 
-  cat(do.call(sprintf, c(list(hdr_fmt), list("量測項目", "系統"), as.list(campaigns))), "\n")
-  cat(strrep("─", 18 + 7 + (cw + 1) * length(campaigns)), "\n")
+  cat(do.call(sprintf, c(list(hdr_fmt), list("\u91cf\u6e2c\u9805\u76ee", "\u7cfb\u7d71"), as.list(campaigns))), "\n")
+  cat(strrep("\u2500", 18 + 7 + (cw + 1) * length(campaigns)), "\n")
 
   prev_cat   <- ""
   prev_group <- ""
   for (i in seq_len(nrow(df))) {
     if (i > 1 && df$category[i] != prev_group)
-      cat(strrep("─", 18 + 7 + (cw + 1) * length(campaigns)), "\n")
+      cat(strrep("\u2500", 18 + 7 + (cw + 1) * length(campaigns)), "\n")
     prev_group <- df$category[i]
 
     cat_lbl <- if (df$category[i] != prev_cat) df$category[i] else ""
@@ -168,7 +168,7 @@ gantt_text <- function(df, colors = NULL, system_labels = NULL,
   }
 
   if (!is.null(notes)) {
-    cat("\n― 備註 ―\n")   # ― 備註 ―
+    cat("\n\u2015 \u5099\u8a3b \u2015\n")   # remark divider
     cat(notes, "\n")
   }
 

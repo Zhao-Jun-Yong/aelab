@@ -18,7 +18,7 @@ normality_test_t(df, variable_name, group, group_1, group_2)
 \item{group_2}{Value identifying the second group.}
 }
 \value{
-A tibble with Shapiro-Wilk p-values for each group × transformation
+A tibble with Shapiro-Wilk p-values for each group \eqn{\times} transformation
   combination.
 }
 \description{

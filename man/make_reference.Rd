@@ -33,7 +33,7 @@ Build a \code{reference_df} for \code{\link{calculate_regression}} from a
 
   The first three columns are positional (required). Optional per-row window overrides
   use \code{key=value} syntax in any order: \code{dur=} sets \code{duration_minutes},
-  \code{off=} sets \code{start_offset_s}. Rows without an override simply omit the token —
+  \code{off=} sets \code{start_offset_s}. Rows without an override simply omit the token -
   no \code{NA} placeholder needed.
 }
 \examples{
@@ -46,7 +46,7 @@ make_reference(
   "
 )
 
-# per-row window overrides — no NA placeholders needed
+# per-row window overrides - no NA placeholders needed
 make_reference(
   date = "2026-05-22",
   measurements = "
