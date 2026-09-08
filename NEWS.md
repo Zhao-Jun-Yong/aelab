@@ -43,6 +43,26 @@
   (pareto mode only): `deadband`, `cutoff`, `slope_uncertainty_lo`, `slope_uncertainty_hi`,
   `n_candidates`. New `@references` section citing Hutchinson & Mosier (1981), Hüppi et al.
   (2018), Gaudard et al. (2025), and Kobayashi et al. (2026).
+* `calculate_regression()` — fixed the `window_type = "pareto"` winner's-curse coverage shortfall
+  reported below (pooled 57.7%/173/300 against nominal 68%). New internal
+  `.pareto_winners_curse_correct()` widens the selected candidate's bootstrap interval by a
+  Bonferroni-style correction sized by Pareto-front membership (how many candidates were genuine
+  contenders for selection, not merely present in the grid), referenced to the winner's own
+  bootstrap SE, inspired by (not an implementation of) Zrnic & Fithian (2025) Section 4's
+  "effective Bonferroni" idea. Reduces to the unmodified interval when the front has one member.
+  Two intermediate designs overcorrected first — slope-value proximity as the competitiveness
+  measure (99% coverage) and plain front-size Bonferroni with no correlation discount (~79%) —
+  before landing on a front-size exponent (`front_correlation = 0.3`) found by an empirical scan
+  against the coverage test below, confirmed at 67.7% (203/300, `binom.test` p = 0.90) on the
+  test's full fixed-seed sample. **Caveat, not yet resolved**: that scan and confirmation draw
+  from the same idealized data-generating process (i.i.d. Gaussian noise, exactly linear trend) —
+  an advisor-panel review of this fix (2026-09-08; Statistician and Journal Reviewer takes, in
+  particular) flagged this as fitting-then-checking-on-the-same-target rather than independent
+  validation, and noted the correction has not been checked against autocorrelated residuals,
+  real chamber artifacts (ebullition, imperfect seals), or a non-linear true trend. See
+  `.pareto_winners_curse_correct()`'s source comment and `data-raw/calibrate_pareto_front_correlation.R`
+  for the full calibration record and open validation gap before trusting this on real closures
+  generally.
 * `calculate_regression()` — fixed a `window_type = "pareto"` bug where the residual bootstrap
   used to estimate slope uncertainty could silently admit numerically degenerate refits for
   `fit_type = "auto"` candidates that resolved to `exp_tz`/`exp_zhao18`. Each bootstrap replicate
@@ -106,7 +126,8 @@
   uncertainty-width axis preferentially picks whichever of the ~16 candidate windows happened to
   draw the narrowest bootstrap interval, which is a biased (too-narrow) estimate of that
   candidate's true sampling variability — rather than a flaw in the residual-DF correction
-  itself. Left as a known, reproducible (fixed seeds) finding for follow-up; not fixed here.
+  itself. Fixed by the winner's-curse correction documented above (with an open validation
+  caveat — see that entry).
 
 # aelab 1.1.5
 

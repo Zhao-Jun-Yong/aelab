@@ -272,6 +272,29 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   resid * sqrt(n / df)
 }
 
+# Once-per-session advisory for window_type = "pareto" - see the @section Experimental note on
+# calculate_regression()'s window_type param and .pareto_winners_curse_correct()'s source comment
+# for what's not yet validated. A plain message(), not a warning(): nothing is wrong with a given
+# call, this is a standing caveat about the feature as a whole, so it fires once (env flag) rather
+# than once per measurement - a package this processes hundreds of measurements per batch run
+# would otherwise be unusable with this on.
+.pareto_experimental_notice_env <- new.env(parent = emptyenv())
+.pareto_experimental_notice_env$shown <- FALSE
+
+.notify_pareto_experimental <- function() {
+  if (!.pareto_experimental_notice_env$shown) {
+    message(
+      "aelab: window_type = \"pareto\" is experimental. Its slope_uncertainty_lo/hi winner's-",
+      "curse correction is calibrated only against idealized synthetic data (i.i.d. Gaussian ",
+      "noise around an exactly linear trend) - not yet validated against real chamber closures, ",
+      "autocorrelated noise, or non-linear trends. Do not report these intervals as validated ",
+      "until broader validation is done (see ?calculate_regression). This message shows once ",
+      "per session."
+    )
+    .pareto_experimental_notice_env$shown <- TRUE
+  }
+}
+
 # Internal helper: window_type = "pareto" candidate search for calculate_regression().
 # Independently grids deadband (dead-band skip, s) x cutoff (window end, s) relative to
 # reference_datetime, fits each candidate via the existing .fit_ghg_model() (so the
@@ -387,7 +410,16 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   nf <- vapply(candidates, function(x) -x$fit_score, numeric(1))
   sel_idx <- .pareto_front_select(uw, nf)
 
-  list(status = "selected", n_candidates = n_candidates, selected = candidates[[sel_idx]])
+  # Winner's-curse correction: the Pareto front tends to favor whichever candidate's bootstrap
+  # interval was spuriously narrow by chance. Widen the reported interval by how many candidates
+  # were genuine contenders on the selection axis itself; leaves it unchanged when only one
+  # candidate is on the front (see .pareto_winners_curse_correct()).
+  corrected <- .pareto_winners_curse_correct(candidates, sel_idx, uw, nf)
+  selected  <- candidates[[sel_idx]]
+  selected$uncertainty_lo <- corrected$lo
+  selected$uncertainty_hi <- corrected$hi
+
+  list(status = "selected", n_candidates = n_candidates, selected = selected)
 }
 
 # Internal helper: given two equal-length numeric vectors to minimize (uw = uncertainty width,
@@ -397,19 +429,97 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 # zero. Exposed separately from .pareto_select_window() so the selection math itself is
 # unit-testable without needing real data/fitting/bootstrap.
 .pareto_front_select <- function(uw, nf) {
-  .normalize <- function(x) {
-    rng <- range(x)
-    if (diff(rng) == 0) rep(0, length(x)) else (x - rng[1]) / diff(rng)
-  }
-  nu <- .normalize(uw)
-  ns <- .normalize(nf)
+  nu <- .pareto_normalize(uw)
+  ns <- .pareto_normalize(nf)
 
-  is_dominated <- vapply(seq_along(nu), function(i) {
-    any(nu <= nu[i] & ns <= ns[i] & (nu < nu[i] | ns < ns[i]))
-  }, logical(1))
+  is_dominated <- .pareto_dominance(nu, ns)
   front_idx <- which(!is_dominated)
   dist      <- sqrt(nu[front_idx]^2 + ns[front_idx]^2)
   front_idx[which.min(dist)]
+}
+
+# Internal helper: min-max normalize a numeric vector to [0, 1]. A constant vector normalizes to
+# all-zero rather than dividing by zero. Shared by .pareto_front_select() and every caller of
+# .pareto_dominance() below so there is exactly one definition of "normalized" to keep in sync -
+# a code-review finding on an earlier version of this file: .pareto_dominance() re-implemented
+# this same closure inline behind a normalized = FALSE flag instead of sharing one helper, so an
+# edit to the normalization logic could silently desync the two callers.
+.pareto_normalize <- function(x) {
+  rng <- range(x)
+  if (diff(rng) == 0) rep(0, length(x)) else (x - rng[1]) / diff(rng)
+}
+
+# Internal helper: Pareto-dominance flags over two ALREADY min-max normalized (via
+# .pareto_normalize()) equal-length vectors to minimize, factored out of .pareto_front_select() so
+# the near-winner correction below reuses the exact same domination test. TRUE where a candidate
+# is dominated (weakly worse on both axes, strictly worse on at least one).
+.pareto_dominance <- function(uw, nf) {
+  vapply(seq_along(uw), function(i) {
+    any(uw <= uw[i] & nf <= nf[i] & (uw < uw[i] | nf < nf[i]))
+  }, logical(1))
+}
+
+# Winner's-curse correction for the selected pareto candidate's slope-uncertainty interval.
+# INSPIRED BY, but not an implementation of, Zrnic & Fithian (2025) Sec 4 "effective Bonferroni"
+# (see Efforts/Academic/summary_Zrnic2025Flexible in the author's vault) - their actual
+# construction is a step-down algorithm restricted by each candidate's estimated suboptimality
+# gap, with a formal coverage guarantee, and their stated advantage over alternatives is needing
+# no tuning parameter. What's implemented here is a much cruder heuristic (front membership raised
+# to an empirically-fit power, see front_correlation below) that borrows the general idea - don't
+# protect the full candidate set, only genuine near-winners - without that guarantee. Flagged by
+# this package's own advisor-panel review (2026-09-08) as a citation that should read as
+# inspiration, not lineage; recorded here rather than reimplementing their actual step-down
+# construction, which remains a real option if this heuristic doesn't hold up under more scrutiny
+# (see the caveats below and in data-raw/calibrate_pareto_front_correlation.R).
+#
+# The Pareto front selects on (uncertainty width, fit quality) - not on the slope estimate itself
+# - so competitiveness has to be measured on *that* axis: two windows of very different length
+# routinely land on nearly the same slope estimate on genuinely linear data while differing
+# enormously in precision, so a first version of this correction that measured competitiveness via
+# slope-value proximity treated almost every candidate as a "near-tie" and wildly over-widened the
+# interval (99% empirical coverage against a 68% target, caught by the ground-truth coverage test
+# below - see git history). Non-dominated (Pareto-front) candidates are exactly the ones that were
+# genuine contenders for selection, so front size is the starting point for "how many candidates
+# could plausibly have won instead" - but see front_correlation immediately below: it is NOT used
+# as a parameter-free count on its own, because plain Bonferroni over the raw front size
+# (front_correlation = 1) still overcorrected (~79% empirical coverage): front members come from
+# *overlapping* windows of the same underlying data, so they are highly positively correlated, not
+# independent, and Bonferroni's union bound is only tight for independent tests (the effect the
+# "effective number of independent tests" literature for correlated multiple testing addresses,
+# e.g. Li & Ji 2005 - cited for the general idea, not as the source of this specific formula).
+# front_correlation discounts the raw front size toward that correlation. The correction is
+# referenced to the *winner's own* bootstrap SE (not each candidate's own, which would let a
+# single wide/imprecise front member's own noise dominate the shared radius, reproducing the same
+# over-widening failure), and reduces to the unmodified interval exactly when the front has only
+# one member (the winner stands alone).
+#
+# CAVEAT (do not treat 0.3 as a validated constant): it was found by a small empirical scan
+# against the ground-truth coverage test below - see data-raw/calibrate_pareto_front_correlation.R
+# for the full scan and results - then "confirmed" on that same test's larger fixed-seed sample.
+# Both draws come from the identical idealized data-generating process (i.i.d. Gaussian noise
+# around an exactly linear trend); this is fitting-then-checking-on-the-same-target, not
+# independent validation, and the advisor-panel review above (Statistician, Journal Reviewer
+# takes) named this explicitly. 0.3 is not derived analytically, is specific to this function's
+# own default grid density (min_deadband/max_deadband/deadband_step, min_window_size/cutoff_step -
+# a much coarser or finer grid would change how correlated adjacent candidates are and may need
+# recalibration), and has never been checked against a data-generating process with autocorrelated
+# residuals, real chamber-closure artifacts (ebullition, imperfect seals), or a non-linear true
+# trend - all flagged by the panel as untested territory this synthetic test cannot reach. Treat
+# `window_type = "pareto"`'s reported coverage as validated for linear-trend/i.i.d.-Gaussian
+# conditions, not yet for real field closures generally.
+.pareto_winners_curse_correct <- function(candidates, sel_idx, uw, nf, conf = 0.68,
+                                          front_correlation = 0.3) {
+  m_eff <- sum(!.pareto_dominance(.pareto_normalize(uw), .pareto_normalize(nf))) ^ front_correlation
+
+  sel    <- candidates[[sel_idx]]
+  z_base <- stats::qnorm(0.5 + conf / 2)
+  z_adj  <- stats::qnorm(1 - (1 - conf) / (2 * m_eff))
+  factor <- z_adj / z_base  # == 1 exactly when the front has one member (m_eff == 1)
+
+  list(
+    lo = sel$slope - (sel$slope - sel$uncertainty_lo) * factor,
+    hi = sel$slope + (sel$uncertainty_hi - sel$slope) * factor
+  )
 }
 
 #' @import tibble
@@ -451,6 +561,14 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   (no candidate can be a numerically degenerate exponential fit), and a candidate pool that is
 #'   empty or whose selected window fails the existing \code{zero}/\code{discard} checks is
 #'   reported as such rather than returning a confident-looking number (see \code{flag}).
+#'
+#'   \strong{Experimental, \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi} not yet
+#'   validated for reporting.} The winner's-curse correction applied to this interval (see
+#'   \code{.pareto_winners_curse_correct()}'s source comment) is calibrated only against
+#'   idealized synthetic data (i.i.d. Gaussian noise around an exactly linear trend) - not yet
+#'   checked against real chamber closures, autocorrelated noise, or non-linear true trends. Do
+#'   not cite these intervals as validated in a manuscript or report until that broader
+#'   validation is done; \code{window_type = "fixed"}/\code{"sliding"} are unaffected by this.
 #' @param start_offset_s Seconds to skip from the reference time before the regression window starts.
 #'   Only used when \code{window_type = "fixed"}. Default 0.
 #'   When \code{reference_df} contains a \code{start_offset_s} column, the per-row value (if not
@@ -523,6 +641,14 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' Kobayashi, A. N. A., Roques, C., Hunkeler, D., & Brunner, P. (2026). Uncertainty
 #' quantification in soil gas fluxes: Reducing the user's arbitrariness. \emph{European Journal
 #' of Soil Science}, 77, e70415. \doi{10.1111/ejss.70415}
+#'
+#' Zrnic, T., & Fithian, W. (2025). Locally simultaneous inference. \emph{Annals of Statistics}.
+#' The \code{window_type = "pareto"} \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi}
+#' interval applies a correction inspired by (not an implementation of) this paper's Section 4
+#' "effective Bonferroni" idea to the winner's-curse bias in the selected candidate's bootstrap
+#' interval, sized by Pareto-front membership with an empirically-calibrated (not analytically
+#' derived) correlation discount - see \code{.pareto_winners_curse_correct()}'s source comment
+#' for calibration caveats not yet resolved for real field data.
 #' @examples
 #' data(n2o)
 #' n2o_converted <- convert_time(n2o)
@@ -669,6 +795,7 @@ calculate_regression <- function(data, reference_df, ghg,
         }
       }
     } else if (window_type == "pareto") {
+      .notify_pareto_experimental()
       pw <- .pareto_select_window(sorted_data, ghg, reference_datetime,
                                   fit_type, t_zero, kappamax, instrument_precision,
                                   min_deadband, max_deadband, deadband_step,
