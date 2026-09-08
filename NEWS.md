@@ -28,6 +28,85 @@
   years) in addition to the Chinese (上午/下午) locale, and for `type = "do"` drops
   readings with a negative (sensor-error) DO or temperature value before
   aggregation.
+* `calculate_regression()` — added `window_type = "pareto"`: independently searches deadband
+  (start skip) and cutoff (window end) times per closure instead of a fixed-length sliding box,
+  trading off fit quality against propagated slope uncertainty via a Pareto front. Adapted from
+  the window-selection idea in Kobayashi et al. (2026), with two deliberate safeguards that
+  differ from that method: the existing `kappamax` gate is always applied to every candidate (no
+  numerically degenerate exponential fit can be selected undetected), and an empty
+  admitted-candidate pool or a selected window that fails the existing correlation/minimum-
+  detectable-slope check is reported as `"discard"`/`"zero"` rather than a fabricated confident
+  number. Fit quality is scored as a per-point-averaged (not summed) Gaussian log-likelihood, so
+  longer windows are not structurally penalized. Slope uncertainty comes from a residual
+  bootstrap (`n_boot`, default 200) — no MCMC, no new dependency. New parameters: `min_deadband`,
+  `max_deadband`, `deadband_step`, `min_window_size`, `cutoff_step`, `n_boot`. New output columns
+  (pareto mode only): `deadband`, `cutoff`, `slope_uncertainty_lo`, `slope_uncertainty_hi`,
+  `n_candidates`. New `@references` section citing Hutchinson & Mosier (1981), Hüppi et al.
+  (2018), Gaudard et al. (2025), and Kobayashi et al. (2026).
+* `calculate_regression()` — fixed a `window_type = "pareto"` bug where the residual bootstrap
+  used to estimate slope uncertainty could silently admit numerically degenerate refits for
+  `fit_type = "auto"` candidates that resolved to `exp_tz`/`exp_zhao18`. Each bootstrap replicate
+  is refit via the candidate's already-resolved model name (e.g. `"exp_tz"`, not `"auto"`), which
+  routed into `.fit_ghg_model()`'s literal exp branches gated only by the outer `kappamax`
+  argument — always `NULL` on the `"auto"` path, since `"auto"` computes its curvature threshold
+  internally and never populates it. With no gate, a non-converging `nls()` refit (which warns,
+  not errors) could return a wildly divergent slope that entered `boot_slopes` unfiltered,
+  contaminating `slope_uncertainty_lo`/`slope_uncertainty_hi`. `.fit_ghg_model()`'s `auto` branch
+  now returns the internally-computed curvature threshold as `kmax_used`; every bootstrap refit
+  for an `"auto"` candidate is gated by that same threshold instead of the outer `kappamax`,
+  matching the gate the point-estimate fit itself was selected under. Behaviour for explicit
+  `fit_type = "exp_tz"`/`"exp_zhao18"` (with a caller-supplied `kappamax`) is unchanged.
+* `calculate_regression()` — switched the `window_type = "pareto"` slope-uncertainty bootstrap
+  from parametric noise to degrees-of-freedom-corrected residual resampling. Each candidate's own
+  residuals (already computed once by `.fit_ghg_model()`) are inflated by `sqrt(n / (n - p))`
+  (`p` = number of fitted parameters for the model actually used — 2 for `linear`, 3 for
+  `quadratic`/`exp_tz`, 4 for `exp_zhao18`) and then resampled with replacement around the
+  candidate's fitted values to build each of the `n_boot` synthetic series, instead of adding
+  fresh `rnorm(n, 0, instrument_precision)` noise. Parametric noise fixed at instrument spec
+  understated real-world uncertainty whenever true residual variance exceeds instrument precision
+  (turbulence, imperfect chamber seals, ebullition spikes) — the common case in field data, not
+  the exception. This changes the uncertainty axis used by the Pareto front, so it can affect
+  which `(deadband, cutoff)` is selected, not just the reported uncertainty width; it does not
+  change `slope` (which comes from the winning candidate's point-estimate fit, never the
+  bootstrap). `instrument_precision` is unaffected elsewhere (still used for the fit-quality score
+  and the minimum-detectable-slope check).
+* `calculate_regression()` — changed the `window_type = "pareto"` default `min_deadband` from `0`
+  to `30`, matching the `start_offset_s = 30` convention this package's own `window_type = "fixed"`
+  batch processing already uses across this lab's campaigns. Still fully overridable; only the
+  out-of-the-box deadband search floor changes (candidate grid `seq(min_deadband, max_deadband -
+  deadband_step, by = deadband_step)` now starts at 30 rather than 0 by default).
+* `calculate_regression()` — raised the `window_type = "pareto"` candidate-admission floor from 3
+  to 4 non-NA concentration points per candidate window. Matches this package's own cited
+  data-sufficiency floor (Maier et al. 2022: fewer than 4 concentration measurements produces
+  unreliable flux/uncertainty estimates), and specifically avoids a 3-point candidate paired with
+  a `fit_type` that resolves to `"quadratic"` (3 fitted parameters) — 0 residual degrees of
+  freedom, i.e. a perfect fit by construction with near-zero residuals, which could pull the
+  min-max-normalized Pareto selection toward it for purely arithmetic (not evidential) reasons.
+  With `min_window_size` defaulting to 60 and `min_deadband` defaulting to 30, this is a no-op
+  under default settings at realistic sampling rates; it only matters as a safety floor for
+  unusually small `min_window_size` values or sparse/gappy data.
+
+## Tests
+
+* Added a synthetic ground-truth recovery/coverage test for `window_type = "pareto"`'s
+  `slope_uncertainty_lo`/`slope_uncertainty_hi` (the DF-corrected residual-bootstrap 68%
+  interval), the one claim in this feature that had never been checked against a known-true
+  slope — every other pareto test validates point behaviour on real/synthetic data where the
+  true slope is unknown. Simulates three signal regimes (strong/weak/near-detection-limit)
+  against a truly linear ground truth with Gaussian noise, runs the full pareto search +
+  bootstrap 100x per regime, and gates on a pooled exact binomial test of observed coverage
+  against the nominal 68% at a stringent 1% significance level (so a well-calibrated bootstrap
+  only fails this Monte Carlo check by chance about 1 run in 100). Off by default (opt in with
+  `AELAB_RUN_SLOW_TESTS=true`, ~1-2 min) since it reruns the full search+bootstrap per repetition;
+  `devtools::test()`/`devtools::check()` skip it and stay fast. With current defaults this test
+  fails: pooled coverage was 57.7% (173/300, `binom.test` p = 0.0002) against nominal 68%, flat
+  across signal strength (56-61% per regime), while a single-fixed-candidate control with no
+  Pareto-front selection among candidates showed 65.3% (p = 0.32, not distinguishable from
+  nominal). This isolates the shortfall to a selection effect — the Pareto front's own
+  uncertainty-width axis preferentially picks whichever of the ~16 candidate windows happened to
+  draw the narrowest bootstrap interval, which is a biased (too-narrow) estimate of that
+  candidate's true sampling variability — rather than a flaw in the residual-DF correction
+  itself. Left as a known, reproducible (fixed seeds) finding for follow-up; not fixed here.
 
 # aelab 1.1.5
 
