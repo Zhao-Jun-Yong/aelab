@@ -396,6 +396,49 @@ test_that(".pareto_front_select handles a single candidate and constant axes", {
   expect_equal(.pareto_front_select(c(1, 1, 1), c(2, 2, 2)), 1)
 })
 
+test_that(".pareto_winners_curse_correct leaves the interval unchanged when the winner dominates the front", {
+  # Winner (idx 1) is strictly narrower AND strictly better-fitting than every other candidate,
+  # so it dominates the whole grid on the Pareto axes - front size 1 - and the correction must
+  # reproduce the pre-correction (uncorrected) interval exactly.
+  z68 <- stats::qnorm(0.84)
+  se  <- 0.0005
+  slopes <- c(0.010, 0.011, 0.009, 0.02)
+  candidates <- lapply(slopes, function(s) {
+    list(slope = s, uncertainty_lo = s - z68 * se, uncertainty_hi = s + z68 * se)
+  })
+  uw <- c(1, 5, 5, 5)  # uncertainty width: winner is narrowest
+  nf <- c(1, 5, 5, 5)  # negative fit score: winner also has the best fit
+  sel_idx <- 1
+  uncorrected_lo <- candidates[[sel_idx]]$uncertainty_lo
+  uncorrected_hi <- candidates[[sel_idx]]$uncertainty_hi
+
+  corrected <- .pareto_winners_curse_correct(candidates, sel_idx, uw, nf)
+
+  expect_equal(corrected$lo, uncorrected_lo, tolerance = 1e-9)
+  expect_equal(corrected$hi, uncorrected_hi, tolerance = 1e-9)
+})
+
+test_that(".pareto_winners_curse_correct widens the interval when the front has a genuine trade-off competitor", {
+  # Winner (idx 1) has the narrower interval but candidate 2 has the better fit score - neither
+  # dominates the other, so the front has 2 members and the correction must strictly widen the
+  # winner's reported interval.
+  z68 <- stats::qnorm(0.84)
+  se  <- 0.0005
+  slopes <- c(0.010, 0.011)
+  candidates <- lapply(slopes, function(s) {
+    list(slope = s, uncertainty_lo = s - z68 * se, uncertainty_hi = s + z68 * se)
+  })
+  uw <- c(1, 3)  # winner narrower...
+  nf <- c(3, 1)  # ...but candidate 2 fits better - a real trade-off, not a domination
+  sel_idx <- 1
+  uncorrected_width <- candidates[[sel_idx]]$uncertainty_hi - candidates[[sel_idx]]$uncertainty_lo
+
+  corrected <- .pareto_winners_curse_correct(candidates, sel_idx, uw, nf)
+  corrected_width <- corrected$hi - corrected$lo
+
+  expect_gt(corrected_width, uncorrected_width)
+})
+
 test_that("pareto window_type generates the expected deadband/cutoff candidate grid", {
   set.seed(11)
   elapsed <- seq(0, 419)

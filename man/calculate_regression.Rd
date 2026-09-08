@@ -173,4 +173,10 @@ Evolution}. \doi{10.1111/2041-210X.70161}
 Kobayashi, A. N. A., Roques, C., Hunkeler, D., & Brunner, P. (2026). Uncertainty
 quantification in soil gas fluxes: Reducing the user's arbitrariness. \emph{European Journal
 of Soil Science}, 77, e70415. \doi{10.1111/ejss.70415}
+
+Zrnic, T., & Fithian, W. (2025). Locally simultaneous inference. \emph{Annals of Statistics}.
+The \code{window_type = "pareto"} \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi}
+interval applies a simplification of this paper's Section 4 "effective Bonferroni" idea,
+sized by Pareto-front membership, to correct winner's-curse bias in the selected candidate's
+bootstrap interval.
 }

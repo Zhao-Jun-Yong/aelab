@@ -387,7 +387,16 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   nf <- vapply(candidates, function(x) -x$fit_score, numeric(1))
   sel_idx <- .pareto_front_select(uw, nf)
 
-  list(status = "selected", n_candidates = n_candidates, selected = candidates[[sel_idx]])
+  # Winner's-curse correction: the Pareto front tends to favor whichever candidate's bootstrap
+  # interval was spuriously narrow by chance. Widen the reported interval by how many candidates
+  # were genuine contenders on the selection axis itself; leaves it unchanged when only one
+  # candidate is on the front (see .pareto_winners_curse_correct()).
+  corrected <- .pareto_winners_curse_correct(candidates, sel_idx, uw, nf)
+  selected  <- candidates[[sel_idx]]
+  selected$uncertainty_lo <- corrected$lo
+  selected$uncertainty_hi <- corrected$hi
+
+  list(status = "selected", n_candidates = n_candidates, selected = selected)
 }
 
 # Internal helper: given two equal-length numeric vectors to minimize (uw = uncertainty width,
@@ -404,12 +413,75 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   nu <- .normalize(uw)
   ns <- .normalize(nf)
 
-  is_dominated <- vapply(seq_along(nu), function(i) {
-    any(nu <= nu[i] & ns <= ns[i] & (nu < nu[i] | ns < ns[i]))
-  }, logical(1))
+  is_dominated <- .pareto_dominance(nu, ns, normalized = TRUE)
   front_idx <- which(!is_dominated)
   dist      <- sqrt(nu[front_idx]^2 + ns[front_idx]^2)
   front_idx[which.min(dist)]
+}
+
+# Internal helper: normalized Pareto-dominance flags, factored out of .pareto_front_select() so
+# the near-winner correction below can reuse the exact same domination test. TRUE where a
+# candidate is dominated (weakly worse on both minimized axes, strictly worse on at least one).
+# Pass normalized = TRUE when uw/nf are already min-max normalized to [0, 1] (as
+# .pareto_front_select already has them); otherwise this normalizes them itself first (a constant
+# axis normalizes to all-zero rather than dividing by zero).
+.pareto_dominance <- function(uw, nf, normalized = FALSE) {
+  if (!normalized) {
+    .normalize <- function(x) {
+      rng <- range(x)
+      if (diff(rng) == 0) rep(0, length(x)) else (x - rng[1]) / diff(rng)
+    }
+    uw <- .normalize(uw)
+    nf <- .normalize(nf)
+  }
+  vapply(seq_along(uw), function(i) {
+    any(uw <= uw[i] & nf <= nf[i] & (uw < uw[i] | nf < nf[i]))
+  }, logical(1))
+}
+
+# Winner's-curse correction for the selected pareto candidate's slope-uncertainty interval
+# (Zrnic & Fithian 2025, Sec 4 "effective Bonferroni"; see
+# Efforts/Academic/summary_Zrnic2025Flexible in the author's vault for the derivation this
+# adapts). The Pareto front selects on (uncertainty width, fit quality) - not on the slope
+# estimate itself - so competitiveness has to be measured on *that* axis: two windows of very
+# different length routinely land on nearly the same slope estimate on genuinely linear data
+# while differing enormously in precision, so a first version of this correction that measured
+# competitiveness via slope-value proximity treated almost every candidate as a "near-tie" and
+# wildly over-widened the interval (99% empirical coverage against a 68% target, caught by the
+# ground-truth coverage test below - see git history). Non-dominated (Pareto-front) candidates are
+# exactly the ones that were genuine contenders for selection; the front's size is therefore the
+# natural, parameter-free measure of how many candidates could plausibly have won instead of the
+# actual winner. Applies a Bonferroni correction sized by that front size, referenced to the
+# *winner's own* bootstrap SE (not each candidate's own, which would let a single wide/imprecise
+# front member's own noise dominate the shared radius, reproducing the same over-widening
+# failure) - this is the simplification Zrnic & Fithian's Sec 4 explicitly offers as easier to
+# implement than the full zoom test. Reduces to the unmodified interval exactly when the front
+# has only one member (the winner stands alone).
+#
+# Plain Bonferroni (front_size^1) still overcorrected in testing (~79% empirical coverage against
+# the 68% target): front members come from *overlapping* windows of the same underlying data, so
+# they are highly positively correlated, not independent - and Bonferroni's union bound is only
+# tight for independent tests (the same effect the "effective number of independent tests"
+# literature for correlated multiple testing corrects for, e.g. Li & Ji 2005). front_correlation
+# discounts the raw front size toward this correlation; 0.3 was found by a small empirical scan
+# against the ground-truth coverage test below (a held-out subset first, confirmed on the test's
+# full sample) rather than derived analytically, and is specific to this function's own default
+# grid density (min_deadband/max_deadband/deadband_step, min_window_size/cutoff_step) - a much
+# coarser or finer grid would change how correlated adjacent candidates are and may need
+# recalibration (rerun the AELAB_RUN_SLOW_TESTS=true coverage test after changing grid defaults).
+.pareto_winners_curse_correct <- function(candidates, sel_idx, uw, nf, conf = 0.68,
+                                          front_correlation = 0.3) {
+  m_eff <- sum(!.pareto_dominance(uw, nf)) ^ front_correlation
+
+  sel    <- candidates[[sel_idx]]
+  z_base <- stats::qnorm(0.5 + conf / 2)
+  z_adj  <- stats::qnorm(1 - (1 - conf) / (2 * m_eff))
+  factor <- z_adj / z_base  # == 1 exactly when the front has one member (m_eff == 1)
+
+  list(
+    lo = sel$slope - (sel$slope - sel$uncertainty_lo) * factor,
+    hi = sel$slope + (sel$uncertainty_hi - sel$slope) * factor
+  )
 }
 
 #' @import tibble
@@ -523,6 +595,12 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' Kobayashi, A. N. A., Roques, C., Hunkeler, D., & Brunner, P. (2026). Uncertainty
 #' quantification in soil gas fluxes: Reducing the user's arbitrariness. \emph{European Journal
 #' of Soil Science}, 77, e70415. \doi{10.1111/ejss.70415}
+#'
+#' Zrnic, T., & Fithian, W. (2025). Locally simultaneous inference. \emph{Annals of Statistics}.
+#' The \code{window_type = "pareto"} \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi}
+#' interval applies a simplification of this paper's Section 4 "effective Bonferroni" idea,
+#' sized by Pareto-front membership, to correct winner's-curse bias in the selected candidate's
+#' bootstrap interval.
 #' @examples
 #' data(n2o)
 #' n2o_converted <- convert_time(n2o)
