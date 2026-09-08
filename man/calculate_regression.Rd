@@ -64,16 +64,24 @@ by gas name. The model chosen for each measurement is recorded in the \code{fit_
 \item{t_zero}{Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.}
 
 \item{window_type}{\code{"sliding"} (default) selects the \code{num_rows}-length sub-window with
-the best R\eqn{^2} within the measurement period. \code{"fixed"} fits a single window starting at
-\code{start_offset_s} seconds after the reference time and running for \code{duration_minutes}.
-Use \code{"fixed"} to ensure all gases are regressed over the same time window.
-\code{"pareto"} independently searches deadband (start skip) and cutoff (window end) times,
-trading off fit quality against propagated slope uncertainty via a Pareto front - adapted
-from the window-selection idea in Kobayashi et al. (2026), with two
-deliberate differences from that method: the existing \code{kappamax} gate is always applied
-(no candidate can be a numerically degenerate exponential fit), and a candidate pool that is
-empty or whose selected window fails the existing \code{zero}/\code{discard} checks is
-reported as such rather than returning a confident-looking number (see \code{flag}).}
+  the best R\eqn{^2} within the measurement period. \code{"fixed"} fits a single window starting at
+  \code{start_offset_s} seconds after the reference time and running for \code{duration_minutes}.
+  Use \code{"fixed"} to ensure all gases are regressed over the same time window.
+  \code{"pareto"} independently searches deadband (start skip) and cutoff (window end) times,
+  trading off fit quality against propagated slope uncertainty via a Pareto front - adapted
+  from the window-selection idea in Kobayashi et al. (2026), with two
+  deliberate differences from that method: the existing \code{kappamax} gate is always applied
+  (no candidate can be a numerically degenerate exponential fit), and a candidate pool that is
+  empty or whose selected window fails the existing \code{zero}/\code{discard} checks is
+  reported as such rather than returning a confident-looking number (see \code{flag}).
+
+  \strong{Experimental, \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi} not yet
+  validated for reporting.} The winner's-curse correction applied to this interval (see
+  \code{.pareto_winners_curse_correct()}'s source comment) is calibrated only against
+  idealized synthetic data (i.i.d. Gaussian noise around an exactly linear trend) - not yet
+  checked against real chamber closures, autocorrelated noise, or non-linear true trends. Do
+  not cite these intervals as validated in a manuscript or report until that broader
+  validation is done; \code{window_type = "fixed"}/\code{"sliding"} are unaffected by this.}
 
 \item{start_offset_s}{Seconds to skip from the reference time before the regression window starts.
 Only used when \code{window_type = "fixed"}. Default 0.

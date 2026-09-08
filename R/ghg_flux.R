@@ -272,6 +272,29 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   resid * sqrt(n / df)
 }
 
+# Once-per-session advisory for window_type = "pareto" - see the @section Experimental note on
+# calculate_regression()'s window_type param and .pareto_winners_curse_correct()'s source comment
+# for what's not yet validated. A plain message(), not a warning(): nothing is wrong with a given
+# call, this is a standing caveat about the feature as a whole, so it fires once (env flag) rather
+# than once per measurement - a package this processes hundreds of measurements per batch run
+# would otherwise be unusable with this on.
+.pareto_experimental_notice_env <- new.env(parent = emptyenv())
+.pareto_experimental_notice_env$shown <- FALSE
+
+.notify_pareto_experimental <- function() {
+  if (!.pareto_experimental_notice_env$shown) {
+    message(
+      "aelab: window_type = \"pareto\" is experimental. Its slope_uncertainty_lo/hi winner's-",
+      "curse correction is calibrated only against idealized synthetic data (i.i.d. Gaussian ",
+      "noise around an exactly linear trend) - not yet validated against real chamber closures, ",
+      "autocorrelated noise, or non-linear trends. Do not report these intervals as validated ",
+      "until broader validation is done (see ?calculate_regression). This message shows once ",
+      "per session."
+    )
+    .pareto_experimental_notice_env$shown <- TRUE
+  }
+}
+
 # Internal helper: window_type = "pareto" candidate search for calculate_regression().
 # Independently grids deadband (dead-band skip, s) x cutoff (window end, s) relative to
 # reference_datetime, fits each candidate via the existing .fit_ghg_model() (so the
@@ -538,6 +561,14 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   (no candidate can be a numerically degenerate exponential fit), and a candidate pool that is
 #'   empty or whose selected window fails the existing \code{zero}/\code{discard} checks is
 #'   reported as such rather than returning a confident-looking number (see \code{flag}).
+#'
+#'   \strong{Experimental, \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi} not yet
+#'   validated for reporting.} The winner's-curse correction applied to this interval (see
+#'   \code{.pareto_winners_curse_correct()}'s source comment) is calibrated only against
+#'   idealized synthetic data (i.i.d. Gaussian noise around an exactly linear trend) - not yet
+#'   checked against real chamber closures, autocorrelated noise, or non-linear true trends. Do
+#'   not cite these intervals as validated in a manuscript or report until that broader
+#'   validation is done; \code{window_type = "fixed"}/\code{"sliding"} are unaffected by this.
 #' @param start_offset_s Seconds to skip from the reference time before the regression window starts.
 #'   Only used when \code{window_type = "fixed"}. Default 0.
 #'   When \code{reference_df} contains a \code{start_offset_s} column, the per-row value (if not
@@ -764,6 +795,7 @@ calculate_regression <- function(data, reference_df, ghg,
         }
       }
     } else if (window_type == "pareto") {
+      .notify_pareto_experimental()
       pw <- .pareto_select_window(sorted_data, ghg, reference_datetime,
                                   fit_type, t_zero, kappamax, instrument_precision,
                                   min_deadband, max_deadband, deadband_step,
