@@ -21,7 +21,13 @@ calculate_regression(
   cor_threshold = 0.5,
   instrument_precision = NULL,
   kappamax = NULL,
-  g_factor_threshold = NULL
+  g_factor_threshold = NULL,
+  min_deadband = 30,
+  max_deadband = 60,
+  deadband_step = 10,
+  min_window_size = 60,
+  cutoff_step = 10,
+  n_boot = 200
 )
 }
 \arguments{
@@ -60,7 +66,14 @@ by gas name. The model chosen for each measurement is recorded in the \code{fit_
 \item{window_type}{\code{"sliding"} (default) selects the \code{num_rows}-length sub-window with
 the best R\eqn{^2} within the measurement period. \code{"fixed"} fits a single window starting at
 \code{start_offset_s} seconds after the reference time and running for \code{duration_minutes}.
-Use \code{"fixed"} to ensure all gases are regressed over the same time window.}
+Use \code{"fixed"} to ensure all gases are regressed over the same time window.
+\code{"pareto"} independently searches deadband (start skip) and cutoff (window end) times,
+trading off fit quality against propagated slope uncertainty via a Pareto front - adapted
+from the window-selection idea in Kobayashi et al. (2026), with two
+deliberate differences from that method: the existing \code{kappamax} gate is always applied
+(no candidate can be a numerically degenerate exponential fit), and a candidate pool that is
+empty or whose selected window fails the existing \code{zero}/\code{discard} checks is
+reported as such rather than returning a confident-looking number (see \code{flag}).}
 
 \item{start_offset_s}{Seconds to skip from the reference time before the regression window starts.
 Only used when \code{window_type = "fixed"}. Default 0.
@@ -91,6 +104,27 @@ that the nonlinear model diverges strongly from the linear fit, which may signal
 artefacts or poor convergence. When this threshold is exceeded, the flag is overridden to
 \code{"discard"}. Default \code{NULL} (disabled). A value of 2 flags measurements where
 the nonlinear slope is more than twice the linear slope.}
+
+\item{min_deadband, max_deadband, deadband_step}{Only used when \code{window_type = "pareto"}.
+Define the candidate deadband (start-skip) grid in seconds, relative to the reference time:
+\code{seq(min_deadband, max_deadband - deadband_step, by = deadband_step)}. Defaults 30, 60, 10.
+\code{min_deadband} defaults to 30 (rather than 0) to match this package's own existing
+\code{start_offset_s = 30} convention used in \code{window_type = "fixed"} batch processing
+across this lab's campaigns; still fully overridable, e.g. set to 0 to let the search consider
+no dead-band at all.}
+
+\item{min_window_size, cutoff_step}{Only used when \code{window_type = "pareto"}. \code{min_window_size}
+(default 60) is the minimum candidate window length in seconds (\code{cutoff - deadband});
+\code{cutoff_step} (default 10) is the step size of the candidate cutoff-time grid, which runs
+from \code{min_deadband + min_window_size} to the window's own maximum elapsed time.}
+
+\item{n_boot}{Only used when \code{window_type = "pareto"}. Number of residual-bootstrap refits
+used to estimate each candidate window's slope uncertainty (16th/84th percentile of the
+bootstrapped slopes). Default 200. Each refit resamples (with replacement) the candidate's
+own degrees-of-freedom-corrected residuals (\code{resid * sqrt(n / (n - p))}, \code{p} = number
+of fitted parameters for the model actually used), adds them to the candidate's fitted
+values to build a synthetic concentration series, and refits the same model family via
+\code{\link{calculate_regression}}'s internal fitting routine - no MCMC and no new dependency.}
 }
 \value{
 A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\eqn{^{-1}}),
@@ -100,7 +134,13 @@ A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\e
   \code{g_factor} (ratio of chosen slope to linear baseline slope; \code{NA} when
   \code{fit_used = "linear"} or for explicit non-auto fits),
   \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),
-  \code{reference_time}, \code{site}, \code{analyzer}.
+  \code{reference_time}, \code{site}, \code{analyzer}. When \code{window_type = "pareto"}, five
+  additional columns are included: \code{deadband}/\code{cutoff} (the selected candidate window,
+  seconds from the reference time; \code{NA} for other window types), \code{slope_uncertainty_lo}/
+  \code{slope_uncertainty_hi} (16th/84th percentile of the residual-bootstrap slope distribution
+  for the selected window), and \code{n_candidates} (number of deadband/cutoff candidates that
+  produced a usable fit; \code{0} when the measurement was flagged \code{"discard"} because no
+  candidate survived).
 }
 \description{
 Calculate the slope of GHG concentration change over time using linear or exponential regression.
@@ -116,4 +156,21 @@ ref <- data.frame(
 calculate_regression(n2o_converted, ref, "N2O",
                      reference_time = "date_time", site = "site",
                      analyzer_code = "1074")
+}
+\references{
+Hutchinson, G. L., & Mosier, A. R. (1981). Improved soil cover method for field measurement of
+nitrous oxide fluxes. \emph{Soil Science Society of America Journal}, 45(2), 311-316.
+\doi{10.2136/sssaj1981.03615995004500020017x}
+
+Hüppi, R., Felber, R., Krauss, M., Six, J., Leifeld, J., & Fuß, R. (2018). Restricting the
+nonlinearity parameter in soil greenhouse gas flux calculations for more reliable flux
+estimates. \emph{PLOS ONE}, 13(7), e0200876. \doi{10.1371/journal.pone.0200876}
+
+Gaudard, J., et al. (2025). fluxible: An R package to process ecosystem gas fluxes from
+closed-loop chambers in an automated and reproducible way. \emph{Methods in Ecology and
+Evolution}. \doi{10.1111/2041-210X.70161}
+
+Kobayashi, A. N. A., Roques, C., Hunkeler, D., & Brunner, P. (2026). Uncertainty
+quantification in soil gas fluxes: Reducing the user's arbitrariness. \emph{European Journal
+of Soil Science}, 77, e70415. \doi{10.1111/ejss.70415}
 }

@@ -128,13 +128,15 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   .lm_result <- function() {
     fit <- stats::lm(conc ~ elapsed_s)
     list(slope = unname(stats::coef(fit)[2]), r_square = summary(fit)$r.squared,
-         b_param = NA_real_, fit_used = "linear")
+         b_param = NA_real_, fit_used = "linear", residuals = stats::residuals(fit),
+         kmax_used = NA_real_)
   }
 
   .quad_result <- function() {
     fit <- stats::lm(conc ~ elapsed_s + I(elapsed_s^2))
     list(slope = unname(stats::coef(fit)[2]), r_square = summary(fit)$r.squared,
-         b_param = NA_real_, fit_used = "quadratic")
+         b_param = NA_real_, fit_used = "quadratic", residuals = stats::residuals(fit),
+         kmax_used = NA_real_)
   }
 
   .exp_tz_result <- function(kmax) {
@@ -150,7 +152,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
     if (!is.null(kmax) && !is.na(b_val) && b_val > kmax) return(NULL)
     slope <- cf["a"] + cf["b"] * (cf["Cm"] - C0) * exp(-cf["b"] * t_zero)
     r_sq  <- if (ss_tot > 0) 1 - sum(stats::residuals(fit)^2) / ss_tot else NA_real_
-    list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_tz")
+    list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_tz",
+         residuals = stats::residuals(fit))
   }
 
   if (fit_type == "linear")    return(.lm_result())
@@ -164,18 +167,21 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
                  control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
       error = function(e) NULL)
     if (is.null(fit)) return(list(slope = NA_real_, r_square = NA_real_,
-                                  b_param = NA_real_, fit_used = "exp_tz"))
+                                  b_param = NA_real_, fit_used = "exp_tz",
+                                  residuals = NA_real_, kmax_used = NA_real_))
     cf    <- stats::coef(fit)
     b_val <- unname(cf["b"])
     if (!is.null(kappamax) && !is.na(b_val) && b_val > kappamax) {
       lin <- stats::lm(conc ~ elapsed_s)
       return(list(slope    = unname(stats::coef(lin)[2]),
                   r_square = summary(lin)$r.squared,
-                  b_param  = b_val, fit_used = "linear"))
+                  b_param  = b_val, fit_used = "linear",
+                  residuals = stats::residuals(lin), kmax_used = NA_real_))
     }
     slope <- cf["a"] + cf["b"] * (cf["Cm"] - C0) * exp(-cf["b"] * t_zero)
     r_sq  <- if (ss_tot > 0) 1 - sum(stats::residuals(fit)^2) / ss_tot else NA_real_
-    return(list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_tz"))
+    return(list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_tz",
+                residuals = stats::residuals(fit), kmax_used = NA_real_))
   }
 
   if (fit_type == "exp_zhao18") {
@@ -186,18 +192,21 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
                  control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
       error = function(e) NULL)
     if (is.null(fit)) return(list(slope = NA_real_, r_square = NA_real_,
-                                  b_param = NA_real_, fit_used = "exp_zhao18"))
+                                  b_param = NA_real_, fit_used = "exp_zhao18",
+                                  residuals = NA_real_, kmax_used = NA_real_))
     cf    <- stats::coef(fit)
     b_val <- unname(cf["b"])
     if (!is.null(kappamax) && !is.na(b_val) && b_val > kappamax) {
       lin <- stats::lm(conc ~ elapsed_s)
       return(list(slope    = unname(stats::coef(lin)[2]),
                   r_square = summary(lin)$r.squared,
-                  b_param  = b_val, fit_used = "linear"))
+                  b_param  = b_val, fit_used = "linear",
+                  residuals = stats::residuals(lin), kmax_used = NA_real_))
     }
     slope <- cf["a"] + cf["b"] * (cf["Cm"] - C0)
     r_sq  <- if (ss_tot > 0) 1 - sum(stats::residuals(fit)^2) / ss_tot else NA_real_
-    return(list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_zhao18"))
+    return(list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_zhao18",
+                residuals = stats::residuals(fit), kmax_used = NA_real_))
   }
 
   if (fit_type == "auto") {
@@ -228,7 +237,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
       best <- exp_res
     }
 
-    best$slope_lm <- lm_slope
+    best$slope_lm  <- lm_slope
+    best$kmax_used <- kmax
     return(best)
   }
 
@@ -236,8 +246,174 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
              ". Use 'linear', 'quadratic', 'exp_tz', 'exp_zhao18', or 'auto'."))
 }
 
+# Internal helper: number of fitted parameters for each model family, used for the
+# degrees-of-freedom correction in .pareto_select_window()'s residual bootstrap. C0 (exp_tz) is
+# fixed from the data (not fit), so it does not count.
+.n_fit_params <- function(fit_used) {
+  switch(fit_used,
+         linear     = 2L,
+         quadratic  = 3L,
+         exp_tz     = 3L,
+         exp_zhao18 = 4L,
+         2L)
+}
+
+# Internal helper: degrees-of-freedom-corrected residuals for residual resampling, used by
+# .pareto_select_window()'s uncertainty bootstrap. Inflates residuals by sqrt(n / (n - p)) so the
+# resampled residual pool's variance matches the estimated (not merely observed) residual
+# variance - the standard small-sample correction for residual-resampling bootstraps (Davison &
+# Hinkley 1997). Guarded at n - p <= 0 (not expected given min_window_size's default of 60, but a
+# floor here avoids a negative-or-zero denominator producing NaN/Inf): falls back to an
+# uncorrected (factor 1) copy of resid rather than propagating NaN.
+.dof_corrected_residuals <- function(resid, p) {
+  n  <- length(resid)
+  df <- n - p
+  if (df <= 0) return(resid)
+  resid * sqrt(n / df)
+}
+
+# Internal helper: window_type = "pareto" candidate search for calculate_regression().
+# Independently grids deadband (dead-band skip, s) x cutoff (window end, s) relative to
+# reference_datetime, fits each candidate via the existing .fit_ghg_model() (so the
+# kappamax gate is never bypassed), scores fit quality as a per-point-averaged Gaussian
+# log-likelihood (not summed, unlike Kobayashi et al. 2026's FCS - avoids a structural bias
+# toward the shortest allowed window), estimates slope uncertainty via a residual bootstrap,
+# and picks the non-dominated (Pareto) candidate closest to the normalized ideal corner.
+# Returns list(status, n_candidates, selected) - status is "no_grid" (too little data to form
+# any candidate), "no_candidates" (candidates existed but none produced a usable fit), or
+# "selected".
+.pareto_select_window <- function(sorted_data, ghg, reference_datetime,
+                                  fit_type, t_zero, kappamax, instrument_precision,
+                                  min_deadband, max_deadband, deadband_step,
+                                  min_window_size, cutoff_step, n_boot) {
+
+  no_grid       <- list(status = "no_grid",       n_candidates = 0L, selected = NULL)
+  no_candidates <- list(status = "no_candidates", n_candidates = 0L, selected = NULL)
+
+  if (nrow(sorted_data) < 2) return(no_grid)
+
+  elapsed_full <- as.numeric(difftime(sorted_data$real_datetime, reference_datetime, units = "secs"))
+  max_elapsed  <- max(elapsed_full)
+
+  deadband_hi <- max_deadband - deadband_step
+  if (deadband_hi < min_deadband) return(no_grid)
+  deadband_grid <- seq(min_deadband, deadband_hi, by = deadband_step)
+
+  cutoff_lo <- min_deadband + min_window_size
+  if (max_elapsed < cutoff_lo) return(no_grid)
+  cutoff_grid <- seq(cutoff_lo, max_elapsed, by = cutoff_step)
+
+  sigma <- instrument_precision
+  candidates <- list()
+
+  for (db in deadband_grid) {
+    for (co in cutoff_grid) {
+      if (co - db < min_window_size) next
+
+      rows <- elapsed_full >= db & elapsed_full <= co
+      # Admission floor of 4 (not 3): matches this package's own cited data-sufficiency floor
+      # (Maier et al. 2022) and, specifically for this feature, avoids a 3-point window paired
+      # with fit_type resolving to "quadratic" (3 fitted parameters) - a 0-residual-df perfect
+      # fit by construction whose near-zero residuals could pull the min-max-normalized Pareto
+      # selection toward it for purely arithmetic, not evidential, reasons.
+      if (sum(rows) < 4) next  # too few points to fit any of the supported model families
+
+      cand_elapsed <- elapsed_full[rows] - db
+      cand_conc    <- as.numeric(sorted_data[[ghg]][rows])
+
+      fit_out <- tryCatch(
+        .fit_ghg_model(cand_conc, cand_elapsed, fit_type, t_zero, kappamax, instrument_precision),
+        error = function(e) NULL)
+
+      if (is.null(fit_out) || is.na(fit_out$slope) || is.na(fit_out$r_square) ||
+          is.infinite(fit_out$r_square) || is.null(fit_out$residuals) ||
+          anyNA(fit_out$residuals)) next
+
+      # Fit-quality score: mean (not summed) per-point Gaussian log-likelihood, so a longer
+      # window is never penalized merely for having more residual terms.
+      fit_score <- mean(-0.5 * ((fit_out$residuals^2) / sigma^2 + log(sigma^2)))
+
+      # Bootstrap refits must reuse the *same* curvature threshold the point-estimate fit was
+      # gated on. When fit_type = "auto", fit_out$fit_used is a resolved literal model name
+      # (e.g. "exp_tz"), so passing the outer kappamax (always NULL here) into
+      # .fit_ghg_model()'s literal branches would leave every bootstrap replicate ungated and
+      # let nls() silently return degenerate slopes (singular-gradient warning, not an error).
+      # Use the kmax that "auto" itself computed and already applied; for non-auto fit_types,
+      # kmax_used is NA_real_ (no such gate was computed) and behavior is unchanged - the
+      # caller's own explicit kappamax keeps gating every refit exactly as before.
+      boot_kappamax <- if (fit_type == "auto") fit_out$kmax_used else kappamax
+
+      # Residual bootstrap for slope uncertainty: refit the same model family n_boot times on
+      # synthetic concentration series built by resampling (with replacement) the candidate's
+      # own degrees-of-freedom-corrected residuals around its fitted values - not fresh
+      # parametric noise. Parametric noise fixed at instrument precision understates real-world
+      # uncertainty whenever true residual variance exceeds instrument spec (turbulence,
+      # imperfect chamber seals, ebullition spikes), which is the common case in field data.
+      n_pts           <- length(cand_conc)
+      fitted_vals     <- cand_conc - fit_out$residuals
+      corrected_resid <- .dof_corrected_residuals(fit_out$residuals, .n_fit_params(fit_out$fit_used))
+      boot_slopes <- vapply(seq_len(n_boot), function(b) {
+        synth_conc <- fitted_vals + sample(corrected_resid, n_pts, replace = TRUE)
+        boot_out   <- tryCatch(
+          .fit_ghg_model(synth_conc, cand_elapsed, fit_out$fit_used, t_zero,
+                         boot_kappamax, instrument_precision),
+          error = function(e) NULL)
+        if (is.null(boot_out)) NA_real_ else boot_out$slope
+      }, numeric(1))
+      boot_slopes <- boot_slopes[!is.na(boot_slopes)]
+      if (length(boot_slopes) < 10) next  # bootstrap too unstable to trust an uncertainty width
+
+      q <- stats::quantile(boot_slopes, probs = c(0.16, 0.84), names = FALSE, na.rm = TRUE)
+
+      candidates[[length(candidates) + 1]] <- list(
+        deadband = db, cutoff = co,
+        slope = fit_out$slope, r_square = fit_out$r_square,
+        cor = stats::cor(cand_conc, cand_elapsed),
+        b_param = fit_out$b_param, fit_used = fit_out$fit_used,
+        slope_lm = if (!is.null(fit_out$slope_lm)) fit_out$slope_lm else NA_real_,
+        fit_score = fit_score,
+        uncertainty_lo = unname(q[1]), uncertainty_hi = unname(q[2]),
+        start_dt = sorted_data$real_datetime[rows][1],
+        end_dt   = sorted_data$real_datetime[rows][sum(rows)]
+      )
+    }
+  }
+
+  n_candidates <- length(candidates)
+  if (n_candidates == 0) return(no_candidates)
+
+  # Pareto front over (uncertainty width, -fit_score), both to be minimized.
+  uw <- vapply(candidates, function(x) x$uncertainty_hi - x$uncertainty_lo, numeric(1))
+  nf <- vapply(candidates, function(x) -x$fit_score, numeric(1))
+  sel_idx <- .pareto_front_select(uw, nf)
+
+  list(status = "selected", n_candidates = n_candidates, selected = candidates[[sel_idx]])
+}
+
+# Internal helper: given two equal-length numeric vectors to minimize (uw = uncertainty width,
+# nf = negative fit-quality score), min-max normalize both, find the non-dominated (Pareto)
+# points, and return the index of the front member closest (Euclidean) to the normalized ideal
+# corner (0, 0). A constant vector normalizes to all-zero on that axis rather than dividing by
+# zero. Exposed separately from .pareto_select_window() so the selection math itself is
+# unit-testable without needing real data/fitting/bootstrap.
+.pareto_front_select <- function(uw, nf) {
+  .normalize <- function(x) {
+    rng <- range(x)
+    if (diff(rng) == 0) rep(0, length(x)) else (x - rng[1]) / diff(rng)
+  }
+  nu <- .normalize(uw)
+  ns <- .normalize(nf)
+
+  is_dominated <- vapply(seq_along(nu), function(i) {
+    any(nu <= nu[i] & ns <= ns[i] & (nu < nu[i] | ns < ns[i]))
+  }, logical(1))
+  front_idx <- which(!is_dominated)
+  dist      <- sqrt(nu[front_idx]^2 + ns[front_idx]^2)
+  front_idx[which.min(dist)]
+}
+
 #' @import tibble
-#' @importFrom stats lm coef nls nls.control residuals cor
+#' @importFrom stats lm coef nls nls.control residuals cor quantile
 #' @importFrom purrr map_dfr
 #' @importFrom stringr str_detect
 #' @title calculate_regression
@@ -268,10 +444,35 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   the best R\eqn{^2} within the measurement period. \code{"fixed"} fits a single window starting at
 #'   \code{start_offset_s} seconds after the reference time and running for \code{duration_minutes}.
 #'   Use \code{"fixed"} to ensure all gases are regressed over the same time window.
+#'   \code{"pareto"} independently searches deadband (start skip) and cutoff (window end) times,
+#'   trading off fit quality against propagated slope uncertainty via a Pareto front - adapted
+#'   from the window-selection idea in Kobayashi et al. (2026), with two
+#'   deliberate differences from that method: the existing \code{kappamax} gate is always applied
+#'   (no candidate can be a numerically degenerate exponential fit), and a candidate pool that is
+#'   empty or whose selected window fails the existing \code{zero}/\code{discard} checks is
+#'   reported as such rather than returning a confident-looking number (see \code{flag}).
 #' @param start_offset_s Seconds to skip from the reference time before the regression window starts.
 #'   Only used when \code{window_type = "fixed"}. Default 0.
 #'   When \code{reference_df} contains a \code{start_offset_s} column, the per-row value (if not
 #'   \code{NA}) overrides this global parameter for that specific measurement.
+#' @param min_deadband,max_deadband,deadband_step Only used when \code{window_type = "pareto"}.
+#'   Define the candidate deadband (start-skip) grid in seconds, relative to the reference time:
+#'   \code{seq(min_deadband, max_deadband - deadband_step, by = deadband_step)}. Defaults 30, 60, 10.
+#'   \code{min_deadband} defaults to 30 (rather than 0) to match this package's own existing
+#'   \code{start_offset_s = 30} convention used in \code{window_type = "fixed"} batch processing
+#'   across this lab's campaigns; still fully overridable, e.g. set to 0 to let the search consider
+#'   no dead-band at all.
+#' @param min_window_size,cutoff_step Only used when \code{window_type = "pareto"}. \code{min_window_size}
+#'   (default 60) is the minimum candidate window length in seconds (\code{cutoff - deadband});
+#'   \code{cutoff_step} (default 10) is the step size of the candidate cutoff-time grid, which runs
+#'   from \code{min_deadband + min_window_size} to the window's own maximum elapsed time.
+#' @param n_boot Only used when \code{window_type = "pareto"}. Number of residual-bootstrap refits
+#'   used to estimate each candidate window's slope uncertainty (16th/84th percentile of the
+#'   bootstrapped slopes). Default 200. Each refit resamples (with replacement) the candidate's
+#'   own degrees-of-freedom-corrected residuals (\code{resid * sqrt(n / (n - p))}, \code{p} = number
+#'   of fitted parameters for the model actually used), adds them to the candidate's fitted
+#'   values to build a synthetic concentration series, and refits the same model family via
+#'   \code{\link{calculate_regression}}'s internal fitting routine - no MCMC and no new dependency.
 #' @param r2_threshold Minimum R-squared for a measurement to pass quality check. Default 0.8.
 #' @param cor_threshold Minimum absolute Pearson correlation between concentration and elapsed time.
 #'   Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.
@@ -299,7 +500,29 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   \code{g_factor} (ratio of chosen slope to linear baseline slope; \code{NA} when
 #'   \code{fit_used = "linear"} or for explicit non-auto fits),
 #'   \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),
-#'   \code{reference_time}, \code{site}, \code{analyzer}.
+#'   \code{reference_time}, \code{site}, \code{analyzer}. When \code{window_type = "pareto"}, five
+#'   additional columns are included: \code{deadband}/\code{cutoff} (the selected candidate window,
+#'   seconds from the reference time; \code{NA} for other window types), \code{slope_uncertainty_lo}/
+#'   \code{slope_uncertainty_hi} (16th/84th percentile of the residual-bootstrap slope distribution
+#'   for the selected window), and \code{n_candidates} (number of deadband/cutoff candidates that
+#'   produced a usable fit; \code{0} when the measurement was flagged \code{"discard"} because no
+#'   candidate survived).
+#' @references
+#' Hutchinson, G. L., & Mosier, A. R. (1981). Improved soil cover method for field measurement of
+#' nitrous oxide fluxes. \emph{Soil Science Society of America Journal}, 45(2), 311-316.
+#' \doi{10.2136/sssaj1981.03615995004500020017x}
+#'
+#' Hüppi, R., Felber, R., Krauss, M., Six, J., Leifeld, J., & Fuß, R. (2018). Restricting the
+#' nonlinearity parameter in soil greenhouse gas flux calculations for more reliable flux
+#' estimates. \emph{PLOS ONE}, 13(7), e0200876. \doi{10.1371/journal.pone.0200876}
+#'
+#' Gaudard, J., et al. (2025). fluxible: An R package to process ecosystem gas fluxes from
+#' closed-loop chambers in an automated and reproducible way. \emph{Methods in Ecology and
+#' Evolution}. \doi{10.1111/2041-210X.70161}
+#'
+#' Kobayashi, A. N. A., Roques, C., Hunkeler, D., & Brunner, P. (2026). Uncertainty
+#' quantification in soil gas fluxes: Reducing the user's arbitrariness. \emph{European Journal
+#' of Soil Science}, 77, e70415. \doi{10.1111/ejss.70415}
 #' @examples
 #' data(n2o)
 #' n2o_converted <- convert_time(n2o)
@@ -321,14 +544,17 @@ calculate_regression <- function(data, reference_df, ghg,
                                  r2_threshold = 0.8, cor_threshold = 0.5,
                                  instrument_precision = NULL,
                                  kappamax = NULL,
-                                 g_factor_threshold = NULL) {
+                                 g_factor_threshold = NULL,
+                                 min_deadband = 30, max_deadband = 60, deadband_step = 10,
+                                 min_window_size = 60, cutoff_step = 10, n_boot = 200) {
 
   fit_type    <- match.arg(fit_type,    c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
-  window_type <- match.arg(window_type, c("sliding", "fixed"))
+  window_type <- match.arg(window_type, c("sliding", "fixed", "pareto"))
 
-  # For fit_type = "auto", resolve instrument_precision from the built-in table if not supplied.
-  # Try to match by model name appearing in analyzer_code (case-insensitive); fall back to first row for the gas.
-  if (fit_type == "auto" && is.null(instrument_precision)) {
+  # For fit_type = "auto" (kappamax) or window_type = "pareto" (fit_score sigma + bootstrap),
+  # resolve instrument_precision from the built-in table if not supplied. Try to match by model
+  # name appearing in analyzer_code (case-insensitive); fall back to first row for the gas.
+  if ((fit_type == "auto" || window_type == "pareto") && is.null(instrument_precision)) {
     for_gas <- analyzer_precision[analyzer_precision$gas == toupper(ghg), ]
     if (nrow(for_gas) > 0) {
       hits <- which(vapply(for_gas$model, function(m)
@@ -337,6 +563,11 @@ calculate_regression <- function(data, reference_df, ghg,
       prec_row <- if (length(hits) > 0) for_gas[hits[1], ] else for_gas[1, ]
       instrument_precision <- prec_row$precision_ppm[1]
     }
+  }
+
+  if (window_type == "pareto" && is.null(instrument_precision)) {
+    stop("window_type = 'pareto' requires instrument_precision (supply it directly, or use a ",
+         "gas/analyzer combination resolvable via the built-in analyzer_precision table).")
   }
 
   reference_time_vec <- lubridate::force_tz(reference_df[[reference_time]], tzone = "Asia/Taipei")
@@ -381,6 +612,14 @@ calculate_regression <- function(data, reference_df, ghg,
     best_start_dt  <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
     best_end_dt    <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
 
+    # pareto-only outputs; stay NA for "fixed"/"sliding"
+    deadband_out       <- NA_real_
+    cutoff_out          <- NA_real_
+    uncertainty_lo_out <- NA_real_
+    uncertainty_hi_out <- NA_real_
+    n_candidates_out    <- NA_integer_
+    force_discard        <- FALSE
+
     if (window_type == "fixed") {
       win_start     <- reference_datetime + start_off_i
       win_end       <- win_start + as.numeric(dur_min_i) * 60
@@ -403,7 +642,7 @@ calculate_regression <- function(data, reference_df, ghg,
         best_start_dt <- selected_data$real_datetime[1]
         best_end_dt   <- selected_data$real_datetime[nrow(selected_data)]
       }
-    } else {
+    } else if (window_type == "sliding") {
       if (nrow(sorted_data) >= num_rows) {
         for (j in 1:(nrow(sorted_data) - num_rows + 1)) {
           selected_data <- sorted_data[j:(j + num_rows - 1), ]
@@ -429,10 +668,40 @@ calculate_regression <- function(data, reference_df, ghg,
           }
         }
       }
+    } else if (window_type == "pareto") {
+      pw <- .pareto_select_window(sorted_data, ghg, reference_datetime,
+                                  fit_type, t_zero, kappamax, instrument_precision,
+                                  min_deadband, max_deadband, deadband_step,
+                                  min_window_size, cutoff_step, n_boot)
+      n_candidates_out <- pw$n_candidates
+
+      if (identical(pw$status, "no_candidates")) {
+        force_discard <- TRUE
+      } else if (identical(pw$status, "selected")) {
+        sel <- pw$selected
+        best_r_square      <- sel$r_square
+        best_slope         <- sel$slope
+        best_slope_lm      <- sel$slope_lm
+        best_b_param       <- sel$b_param
+        best_fit_used      <- sel$fit_used
+        best_cor           <- sel$cor
+        best_start_dt      <- sel$start_dt
+        best_end_dt        <- sel$end_dt
+        deadband_out       <- sel$deadband
+        cutoff_out          <- sel$cutoff
+        uncertainty_lo_out <- sel$uncertainty_lo
+        uncertainty_hi_out <- sel$uncertainty_hi
+      }
+      # status == "no_grid" (too little data): best_* stay at their NA/-Inf defaults,
+      # matching how "fixed"/"sliding" fall through to flag = "no_data" below.
     }
 
-    # Quality flag: correlation threshold distinguishes "zero" (no trend) from "discard" (poor fit)
-    flag <- if (is.na(best_cor) || is.infinite(best_r_square)) {
+    # Quality flag: correlation threshold distinguishes "zero" (no trend) from "discard" (poor fit).
+    # For window_type = "pareto", an empty admitted-candidate pool is reported as "discard" rather
+    # than falling through to "no_data" (data existed; no candidate window survived the fit).
+    flag <- if (force_discard) {
+      "discard"
+    } else if (is.na(best_cor) || is.infinite(best_r_square)) {
       "no_data"
     } else if (abs(best_cor) < cor_threshold) {
       "zero"
@@ -464,18 +733,23 @@ calculate_regression <- function(data, reference_df, ghg,
     }
 
     tibble(
-      start_time     = format(best_start_dt, "%Y/%m/%d %H:%M:%S"),
-      end_time       = format(best_end_dt, "%Y/%m/%d %H:%M:%S"),
-      slope          = best_slope,
-      r_square       = best_r_square,
-      correlation    = best_cor,
-      b_param        = best_b_param,
-      fit_used       = best_fit_used,
-      g_factor       = g_factor,
-      flag           = flag,
-      reference_time = reference_time_vec[i],
-      site           = reference_site[i],
-      analyzer       = reference_analyzer[i]
+      start_time           = format(best_start_dt, "%Y/%m/%d %H:%M:%S"),
+      end_time             = format(best_end_dt, "%Y/%m/%d %H:%M:%S"),
+      slope                = best_slope,
+      r_square             = best_r_square,
+      correlation          = best_cor,
+      b_param              = best_b_param,
+      fit_used             = best_fit_used,
+      g_factor             = g_factor,
+      flag                 = flag,
+      deadband             = deadband_out,
+      cutoff               = cutoff_out,
+      slope_uncertainty_lo = uncertainty_lo_out,
+      slope_uncertainty_hi = uncertainty_hi_out,
+      n_candidates         = n_candidates_out,
+      reference_time       = reference_time_vec[i],
+      site                 = reference_site[i],
+      analyzer             = reference_analyzer[i]
     )
   })
 
