@@ -439,36 +439,54 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   }, logical(1))
 }
 
-# Winner's-curse correction for the selected pareto candidate's slope-uncertainty interval
-# (Zrnic & Fithian 2025, Sec 4 "effective Bonferroni"; see
-# Efforts/Academic/summary_Zrnic2025Flexible in the author's vault for the derivation this
-# adapts). The Pareto front selects on (uncertainty width, fit quality) - not on the slope
-# estimate itself - so competitiveness has to be measured on *that* axis: two windows of very
-# different length routinely land on nearly the same slope estimate on genuinely linear data
-# while differing enormously in precision, so a first version of this correction that measured
-# competitiveness via slope-value proximity treated almost every candidate as a "near-tie" and
-# wildly over-widened the interval (99% empirical coverage against a 68% target, caught by the
-# ground-truth coverage test below - see git history). Non-dominated (Pareto-front) candidates are
-# exactly the ones that were genuine contenders for selection; the front's size is therefore the
-# natural, parameter-free measure of how many candidates could plausibly have won instead of the
-# actual winner. Applies a Bonferroni correction sized by that front size, referenced to the
-# *winner's own* bootstrap SE (not each candidate's own, which would let a single wide/imprecise
-# front member's own noise dominate the shared radius, reproducing the same over-widening
-# failure) - this is the simplification Zrnic & Fithian's Sec 4 explicitly offers as easier to
-# implement than the full zoom test. Reduces to the unmodified interval exactly when the front
-# has only one member (the winner stands alone).
+# Winner's-curse correction for the selected pareto candidate's slope-uncertainty interval.
+# INSPIRED BY, but not an implementation of, Zrnic & Fithian (2025) Sec 4 "effective Bonferroni"
+# (see Efforts/Academic/summary_Zrnic2025Flexible in the author's vault) - their actual
+# construction is a step-down algorithm restricted by each candidate's estimated suboptimality
+# gap, with a formal coverage guarantee, and their stated advantage over alternatives is needing
+# no tuning parameter. What's implemented here is a much cruder heuristic (front membership raised
+# to an empirically-fit power, see front_correlation below) that borrows the general idea - don't
+# protect the full candidate set, only genuine near-winners - without that guarantee. Flagged by
+# this package's own advisor-panel review (2026-09-08) as a citation that should read as
+# inspiration, not lineage; recorded here rather than reimplementing their actual step-down
+# construction, which remains a real option if this heuristic doesn't hold up under more scrutiny
+# (see the caveats below and in data-raw/calibrate_pareto_front_correlation.R).
 #
-# Plain Bonferroni (front_size^1) still overcorrected in testing (~79% empirical coverage against
-# the 68% target): front members come from *overlapping* windows of the same underlying data, so
-# they are highly positively correlated, not independent - and Bonferroni's union bound is only
-# tight for independent tests (the same effect the "effective number of independent tests"
-# literature for correlated multiple testing corrects for, e.g. Li & Ji 2005). front_correlation
-# discounts the raw front size toward this correlation; 0.3 was found by a small empirical scan
-# against the ground-truth coverage test below (a held-out subset first, confirmed on the test's
-# full sample) rather than derived analytically, and is specific to this function's own default
-# grid density (min_deadband/max_deadband/deadband_step, min_window_size/cutoff_step) - a much
-# coarser or finer grid would change how correlated adjacent candidates are and may need
-# recalibration (rerun the AELAB_RUN_SLOW_TESTS=true coverage test after changing grid defaults).
+# The Pareto front selects on (uncertainty width, fit quality) - not on the slope estimate itself
+# - so competitiveness has to be measured on *that* axis: two windows of very different length
+# routinely land on nearly the same slope estimate on genuinely linear data while differing
+# enormously in precision, so a first version of this correction that measured competitiveness via
+# slope-value proximity treated almost every candidate as a "near-tie" and wildly over-widened the
+# interval (99% empirical coverage against a 68% target, caught by the ground-truth coverage test
+# below - see git history). Non-dominated (Pareto-front) candidates are exactly the ones that were
+# genuine contenders for selection, so front size is the starting point for "how many candidates
+# could plausibly have won instead" - but see front_correlation immediately below: it is NOT used
+# as a parameter-free count on its own, because plain Bonferroni over the raw front size
+# (front_correlation = 1) still overcorrected (~79% empirical coverage): front members come from
+# *overlapping* windows of the same underlying data, so they are highly positively correlated, not
+# independent, and Bonferroni's union bound is only tight for independent tests (the effect the
+# "effective number of independent tests" literature for correlated multiple testing addresses,
+# e.g. Li & Ji 2005 - cited for the general idea, not as the source of this specific formula).
+# front_correlation discounts the raw front size toward that correlation. The correction is
+# referenced to the *winner's own* bootstrap SE (not each candidate's own, which would let a
+# single wide/imprecise front member's own noise dominate the shared radius, reproducing the same
+# over-widening failure), and reduces to the unmodified interval exactly when the front has only
+# one member (the winner stands alone).
+#
+# CAVEAT (do not treat 0.3 as a validated constant): it was found by a small empirical scan
+# against the ground-truth coverage test below - see data-raw/calibrate_pareto_front_correlation.R
+# for the full scan and results - then "confirmed" on that same test's larger fixed-seed sample.
+# Both draws come from the identical idealized data-generating process (i.i.d. Gaussian noise
+# around an exactly linear trend); this is fitting-then-checking-on-the-same-target, not
+# independent validation, and the advisor-panel review above (Statistician, Journal Reviewer
+# takes) named this explicitly. 0.3 is not derived analytically, is specific to this function's
+# own default grid density (min_deadband/max_deadband/deadband_step, min_window_size/cutoff_step -
+# a much coarser or finer grid would change how correlated adjacent candidates are and may need
+# recalibration), and has never been checked against a data-generating process with autocorrelated
+# residuals, real chamber-closure artifacts (ebullition, imperfect seals), or a non-linear true
+# trend - all flagged by the panel as untested territory this synthetic test cannot reach. Treat
+# `window_type = "pareto"`'s reported coverage as validated for linear-trend/i.i.d.-Gaussian
+# conditions, not yet for real field closures generally.
 .pareto_winners_curse_correct <- function(candidates, sel_idx, uw, nf, conf = 0.68,
                                           front_correlation = 0.3) {
   m_eff <- sum(!.pareto_dominance(uw, nf)) ^ front_correlation
@@ -598,9 +616,11 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'
 #' Zrnic, T., & Fithian, W. (2025). Locally simultaneous inference. \emph{Annals of Statistics}.
 #' The \code{window_type = "pareto"} \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi}
-#' interval applies a simplification of this paper's Section 4 "effective Bonferroni" idea,
-#' sized by Pareto-front membership, to correct winner's-curse bias in the selected candidate's
-#' bootstrap interval.
+#' interval applies a correction inspired by (not an implementation of) this paper's Section 4
+#' "effective Bonferroni" idea to the winner's-curse bias in the selected candidate's bootstrap
+#' interval, sized by Pareto-front membership with an empirically-calibrated (not analytically
+#' derived) correlation discount - see \code{.pareto_winners_curse_correct()}'s source comment
+#' for calibration caveats not yet resolved for real field data.
 #' @examples
 #' data(n2o)
 #' n2o_converted <- convert_time(n2o)

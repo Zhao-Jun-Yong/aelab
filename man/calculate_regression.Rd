@@ -176,7 +176,9 @@ of Soil Science}, 77, e70415. \doi{10.1111/ejss.70415}
 
 Zrnic, T., & Fithian, W. (2025). Locally simultaneous inference. \emph{Annals of Statistics}.
 The \code{window_type = "pareto"} \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi}
-interval applies a simplification of this paper's Section 4 "effective Bonferroni" idea,
-sized by Pareto-front membership, to correct winner's-curse bias in the selected candidate's
-bootstrap interval.
+interval applies a correction inspired by (not an implementation of) this paper's Section 4
+"effective Bonferroni" idea to the winner's-curse bias in the selected candidate's bootstrap
+interval, sized by Pareto-front membership with an empirically-calibrated (not analytically
+derived) correlation discount - see \code{.pareto_winners_curse_correct()}'s source comment
+for calibration caveats not yet resolved for real field data.
 }
