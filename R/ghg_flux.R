@@ -406,34 +406,31 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 # zero. Exposed separately from .pareto_select_window() so the selection math itself is
 # unit-testable without needing real data/fitting/bootstrap.
 .pareto_front_select <- function(uw, nf) {
-  .normalize <- function(x) {
-    rng <- range(x)
-    if (diff(rng) == 0) rep(0, length(x)) else (x - rng[1]) / diff(rng)
-  }
-  nu <- .normalize(uw)
-  ns <- .normalize(nf)
+  nu <- .pareto_normalize(uw)
+  ns <- .pareto_normalize(nf)
 
-  is_dominated <- .pareto_dominance(nu, ns, normalized = TRUE)
+  is_dominated <- .pareto_dominance(nu, ns)
   front_idx <- which(!is_dominated)
   dist      <- sqrt(nu[front_idx]^2 + ns[front_idx]^2)
   front_idx[which.min(dist)]
 }
 
-# Internal helper: normalized Pareto-dominance flags, factored out of .pareto_front_select() so
-# the near-winner correction below can reuse the exact same domination test. TRUE where a
-# candidate is dominated (weakly worse on both minimized axes, strictly worse on at least one).
-# Pass normalized = TRUE when uw/nf are already min-max normalized to [0, 1] (as
-# .pareto_front_select already has them); otherwise this normalizes them itself first (a constant
-# axis normalizes to all-zero rather than dividing by zero).
-.pareto_dominance <- function(uw, nf, normalized = FALSE) {
-  if (!normalized) {
-    .normalize <- function(x) {
-      rng <- range(x)
-      if (diff(rng) == 0) rep(0, length(x)) else (x - rng[1]) / diff(rng)
-    }
-    uw <- .normalize(uw)
-    nf <- .normalize(nf)
-  }
+# Internal helper: min-max normalize a numeric vector to [0, 1]. A constant vector normalizes to
+# all-zero rather than dividing by zero. Shared by .pareto_front_select() and every caller of
+# .pareto_dominance() below so there is exactly one definition of "normalized" to keep in sync -
+# a code-review finding on an earlier version of this file: .pareto_dominance() re-implemented
+# this same closure inline behind a normalized = FALSE flag instead of sharing one helper, so an
+# edit to the normalization logic could silently desync the two callers.
+.pareto_normalize <- function(x) {
+  rng <- range(x)
+  if (diff(rng) == 0) rep(0, length(x)) else (x - rng[1]) / diff(rng)
+}
+
+# Internal helper: Pareto-dominance flags over two ALREADY min-max normalized (via
+# .pareto_normalize()) equal-length vectors to minimize, factored out of .pareto_front_select() so
+# the near-winner correction below reuses the exact same domination test. TRUE where a candidate
+# is dominated (weakly worse on both axes, strictly worse on at least one).
+.pareto_dominance <- function(uw, nf) {
   vapply(seq_along(uw), function(i) {
     any(uw <= uw[i] & nf <= nf[i] & (uw < uw[i] | nf < nf[i]))
   }, logical(1))
@@ -489,7 +486,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 # conditions, not yet for real field closures generally.
 .pareto_winners_curse_correct <- function(candidates, sel_idx, uw, nf, conf = 0.68,
                                           front_correlation = 0.3) {
-  m_eff <- sum(!.pareto_dominance(uw, nf)) ^ front_correlation
+  m_eff <- sum(!.pareto_dominance(.pareto_normalize(uw), .pareto_normalize(nf))) ^ front_correlation
 
   sel    <- candidates[[sel_idx]]
   z_base <- stats::qnorm(0.5 + conf / 2)
