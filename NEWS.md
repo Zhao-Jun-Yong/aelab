@@ -1,3 +1,20 @@
+# aelab (development version)
+
+## Flux QC changes (`calculate_regression()`) — slopes and flags change on re-run
+
+* `fit_type = "auto"` accepts a quadratic or exponential fit only when its AICc is lower than the
+  current model's (Kutzbach et al. 2007; Leiber-Sauheitl et al. 2014; goFlux), replacing the
+  unsourced "R² improves by > 0.01" rule.
+* `fit_type = "auto"` rejects a quadratic that accelerates instead of levelling off (curvature with
+  the same sign as the linear slope), keeping the linear fit (Levy et al. 2011, p. 817). This also
+  stops t0-slope sign flips (negative g-factor).
+* The minimum-detectable-slope check no longer turns `"ok"` into `"zero"`. It sets the new
+  `below_mdf` column instead (Gaudard et al. 2025, p. 4; Maier et al. 2022, p. 11).
+* `analyzer_precision`: LI-COR 1 s values (CH4 0.60 ppb, CO2 3.5 ppm, N2O 0.40 ppb) replace values
+  that did not match the LI-COR specifications. Column `precision_ppm` is replaced by `precision`
+  and `unit`, stored in the unit each analyzer reports, so CH4/N2O are no longer compared in ppm
+  against ppb data.
+
 # aelab 1.1.6
 
 ## New functions

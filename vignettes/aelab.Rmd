@@ -100,7 +100,7 @@ The `fit_type` parameter controls the regression model:
 - **`"linear"`** (default): ordinary least-squares slope. Valid when concentration change is small relative to ambient.
 - **`"quadratic"`**: second-order polynomial; the reported slope is the initial rate at t = 0 (the coefficient of *t*).
 - **`"exp_tz"`** / **`"exp_zhao18"`**: Hutchinson–Mosier nonlinear exponential models; slope evaluated at `t_zero`.
-- **`"auto"`**: tries linear → quadratic → exp_tz in sequence, accepting a more complex model only when R² improves by > 0.01 and the exponential curvature parameter *b* does not exceed κ~max~ (Hüppi et al. 2018). The model chosen for each measurement is recorded in the `fit_used` output column.
+- **`"auto"`**: tries linear → quadratic → exp_tz in sequence, accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a quadratic only when it levels off rather than accelerates (Levy et al. 2011), and an exponential only when its curvature parameter *b* does not exceed κ~max~ (Hüppi et al. 2018). The model chosen for each measurement is recorded in the `fit_used` output column.
 
 When `fit_type = "auto"`, analyser precision is looked up automatically from the built-in `analyzer_precision` dataset (LI-7810, LI-7820, and LGR UGGA) if `instrument_precision` (see Quality flags below) is not supplied. The lookup matches the `analyzer_code` argument against model names case-insensitively, so `"LGR"` correctly resolves to LGR UGGA precision rather than falling back to LI-7810.
 

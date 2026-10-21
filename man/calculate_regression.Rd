@@ -93,10 +93,11 @@ When \code{reference_df} contains a \code{start_offset_s} column, the per-row va
 \item{cor_threshold}{Minimum absolute Pearson correlation between concentration and elapsed time.
 Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.}
 
-\item{instrument_precision}{Optional. Analyser precision in ppm. Used in two ways:
-(1) minimum-detectable-slope check - measurements whose absolute slope falls below
-\code{instrument_precision / window_duration_s} are flagged \code{"zero"} even if R\eqn{^2}
-and correlation pass; (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
+\item{instrument_precision}{Optional. Analyser precision (1σ) in the same concentration unit as
+the \code{ghg} column (ppb for LI-COR CH4/N2O, ppm for CO2). Used in two ways:
+(1) minimum-detectable-slope check - \code{below_mdf} is \code{TRUE} when the absolute slope
+falls below \code{instrument_precision / window_duration_s}; the flag is not changed, because
+low fluxes with a good fit are kept (Gaudard et al. 2025; Maier et al. 2022); (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
 (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
 fluxes permit more curvature and near-detection-limit measurements are kept linear.}
 
@@ -142,6 +143,8 @@ A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\e
   \code{g_factor} (ratio of chosen slope to linear baseline slope; \code{NA} when
   \code{fit_used = "linear"} or for explicit non-auto fits),
   \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),
+  \code{below_mdf} (\code{TRUE} when the slope is below the minimum detectable slope;
+  \code{NA} without \code{instrument_precision}),
   \code{reference_time}, \code{site}, \code{analyzer}. When \code{window_type = "pareto"}, five
   additional columns are included: \code{deadband}/\code{cutoff} (the selected candidate window,
   seconds from the reference time; \code{NA} for other window types), \code{slope_uncertainty_lo}/
