@@ -120,7 +120,7 @@ Each measurement receives a `flag` in the output:
 |---|---|
 | `ok` | R² ≥ threshold and correlation ≥ threshold; use this slope |
 | `discard` | Detectable trend but poor fit (R² below threshold) |
-| `zero` | No detectable trend (correlation below threshold, or slope within instrument noise) |
+| `zero` | No detectable trend (correlation below threshold). A slope below precision ÷ window duration keeps its flag and gets `below_mdf = TRUE` |
 | `no_data` | Insufficient data in the window |
 
 Two optional parameters tighten the quality control:

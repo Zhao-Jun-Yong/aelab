@@ -9,7 +9,7 @@
   the same sign as the linear slope), keeping the linear fit (Levy et al. 2011, p. 817). This also
   stops t0-slope sign flips (negative g-factor).
 * The minimum-detectable-slope check no longer turns `"ok"` into `"zero"`. It sets the new
-  `below_mdf` column instead (Gaudard et al. 2025, p. 4; Maier et al. 2022, p. 11).
+  `below_mdf` column instead (Gaudard et al. 2025, p. 4; Maier et al. 2022, p. 457).
 * `analyzer_precision`: LI-COR 1 s values (CH4 0.60 ppb, CO2 3.5 ppm, N2O 0.40 ppb) replace values
   that did not match the LI-COR specifications. Column `precision_ppm` is replaced by `precision`
   and `unit`, stored in the unit each analyzer reports, so CH4/N2O are no longer compared in ppm

@@ -562,8 +562,9 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   \code{"exp_tz"} (exponential with linear drift and user-specified \code{t_zero}),
 #'   \code{"exp_zhao18"} (exponential with linear drift and estimated t0), or
 #'   \code{"auto"} (automatic model selection: tries linear -> quadratic -> exp_tz in order,
-#'   accepting a more complex model only when R\eqn{^2} improves by > 0.01 and, for exp_tz, the
-#'   curvature parameter kappa does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
+#'   accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a
+#'   quadratic only when it levels off rather than accelerates (Levy et al. 2011), and exp_tz only
+#'   when its curvature parameter does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
 #'   \code{instrument_precision = NULL}, precision is looked up from \code{\link{analyzer_precision}}
 #'   by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.
 #' @param t_zero Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.
@@ -627,8 +628,9 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   \code{fit_type = "auto"} and the selected model is not linear. Values far from 1 indicate
 #'   that the nonlinear model diverges strongly from the linear fit, which may signal noise
 #'   artefacts or poor convergence. When this threshold is exceeded, the flag is overridden to
-#'   \code{"discard"}. Default \code{NULL} (disabled). A value of 2 flags measurements where
-#'   the nonlinear slope is more than twice the linear slope.
+#'   \code{"discard"}. Default \code{NULL} (disabled). goFlux uses 2 as its default
+#'   (\code{g.limit}; Rheault et al. 2024), but there it is two-sided (|g| > 2 or < 0.5) and switches to
+#'   the linear flux rather than discarding; no published study justifies a value.
 #' @return A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\eqn{^{-1}}),
 #'   \code{r_square}, \code{correlation}, \code{b_param} (exponential curvature; \code{NA} for
 #'   linear/quadratic), \code{fit_used} (model actually used: \code{"linear"}, \code{"quadratic"},
@@ -860,7 +862,7 @@ calculate_regression <- function(data, reference_df, ghg,
 
     # Minimum detectable slope: marked, not used to override the flag. Low fluxes with a good fit
     # are kept as such (Gaudard et al. 2025, p. 4; fluxible SI Table A1) and sub-MDF fluxes
-    # "should not be treated as zero fluxes or be discarded" (Maier et al. 2022, p. 11).
+    # "should not be treated as zero fluxes or be discarded" (Maier et al. 2022, p. 457).
     below_mdf <- NA
     if (!is.null(instrument_precision) && !is.na(best_slope)) {
       duration_s <- as.numeric(difftime(best_end_dt, best_start_dt, units = "secs"))

@@ -12,11 +12,11 @@
 
 `calculate_regression()` has been substantially extended:
 
-- **`fit_type = "auto"`** — automatic model selection per measurement window: tries linear → quadratic → `exp_tz` in order, accepting a more complex model only when R² improves by > 0.01 and, for the exponential fit, the curvature κ does not exceed `kappamax`. The model chosen is recorded in the new `fit_used` output column.
+- **`fit_type = "auto"`** — automatic model selection per measurement window: tries linear → quadratic → `exp_tz` in order, accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a quadratic only when it levels off rather than accelerates (Levy et al. 2011), and the exponential fit only when its curvature κ does not exceed `kappamax`. The model chosen is recorded in the new `fit_used` output column.
 - **`window_type = "fixed"` + `start_offset_s`** — regresses a single fixed window starting at a user-specified dead-bar offset (e.g. 30 s) after the reference time. Ensures all gases are regressed over the same time period. The default `"sliding"` window remains available for backward compatibility.
 - **Per-row window overrides** — `reference_df` may include optional `duration_minutes` and/or `start_offset_s` columns. When a row has a non-`NA` value, it overrides the global parameter for that measurement. Useful when individual closures have different deployment lengths or early-saturation artefacts.
-- **`kappamax`** — caps exponential curvature at a physically plausible maximum. When `fit_type = "auto"`, `kappamax` is computed automatically per window from the built-in `analyzer_precision` dataset (instrument 1σ precision ÷ C₀ ÷ window duration).
-- **`analyzer_precision` dataset** — built-in lookup table of 1-second precision values (ppm, 1σ) for LI-7810 (CH₄, CO₂), LI-7820 (N₂O), and LGR UGGA (CH₄, CO₂). Used automatically by `fit_type = "auto"`.
+- **`kappamax`** — caps exponential curvature at a physically plausible maximum. When `fit_type = "auto"`, `kappamax` is computed automatically per window from the built-in `analyzer_precision` dataset (κmax = |linear slope| ÷ instrument 1σ precision; Hüppi et al. 2018).
+- **`analyzer_precision` dataset** — built-in lookup table of 1-second precision values (1σ, in each analyzer's reporting unit: ppb for LI-COR CH₄/N₂O, otherwise ppm) for LI-7810 (CH₄, CO₂), LI-7820 (N₂O), and LGR UGGA (CH₄, CO₂). Used automatically by `fit_type = "auto"`.
 - **`fit_used` column** — new output column recording which model was actually selected (`"linear"`, `"quadratic"`, or `"exp_tz"`). Always matches `fit_type` unless `fit_type = "auto"`.
 
 `make_reference()` builds a `reference_df` for `calculate_regression()` from a compact multiline string of field notes — one closure per line: `time  site  analyzer  [dur=N]  [off=N]`. Optionally writes the result to `.xlsx`.
