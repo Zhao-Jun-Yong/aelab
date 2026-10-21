@@ -108,7 +108,7 @@ test_that("calculate_regression flags flat noisy signal as zero", {
   expect_lt(abs(result$correlation), 0.5)
 })
 
-test_that("instrument_precision overrides ok to zero when slope is within noise", {
+test_that("instrument_precision marks below_mdf without overriding the flag", {
   elapsed <- seq(0, 419)
   # slope = 0.0001 ppm/s; min detectable = 0.1 ppm / 300 s ≈ 0.000333 ppm/s > 0.0001
   data <- data.frame(
@@ -128,7 +128,9 @@ test_that("instrument_precision overrides ok to zero when slope is within noise"
                                            site = "site", analyzer_code = "TEST",
                                            instrument_precision = 0.1)
   expect_equal(result_no_prec$flag, "ok")
-  expect_equal(result_with_prec$flag, "zero")
+  expect_true(is.na(result_no_prec$below_mdf))
+  expect_equal(result_with_prec$flag, "ok")
+  expect_true(result_with_prec$below_mdf)
 })
 
 test_that("calculate_regression exp_tz fits exponential signal and returns positive slope", {
@@ -291,11 +293,11 @@ test_that("g_factor is NA when auto mode selects linear (no upgrade)", {
 
 test_that("g_factor is computed when auto mode selects quadratic", {
   elapsed <- seq(0, 419)
-  # Strong quadratic: lm slope ~0.020, quadratic initial slope 0.01 → g_factor ~0.49
+  # Decelerating rise: quadratic initial slope 0.03, lm slope ~0.0174 → g_factor ~1.72
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
                                by = "sec", length.out = 420),
-    CH4 = 2 + 0.01 * elapsed + 0.00005 * elapsed^2
+    CH4 = 2 + 0.03 * elapsed - 0.00003 * elapsed^2
   )
   ref <- data.frame(
     date_time = as.POSIXct("2024-12-16 12:00:00", tz = "Asia/Taipei"),
@@ -308,12 +310,12 @@ test_that("g_factor is computed when auto mode selects quadratic", {
                                  duration_minutes = 7)
   expect_equal(result$fit_used, "quadratic")
   expect_false(is.na(result$g_factor))
-  # Quadratic initial slope (0.01) < lm slope (~0.02), so g_factor < 1
-  expect_lt(result$g_factor, 1)
-  expect_gt(result$g_factor, 0)
+  # Decelerating curve: initial slope (0.03) > lm slope (~0.0174), so g_factor > 1
+  expect_gt(result$g_factor, 1)
+  expect_lt(result$g_factor, 2)
 })
 
-test_that("g_factor_threshold overrides ok to discard when ratio exceeds limit", {
+test_that("auto mode keeps linear when the quadratic accelerates (Levy et al. 2011)", {
   elapsed <- seq(0, 419)
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
@@ -324,27 +326,47 @@ test_that("g_factor_threshold overrides ok to discard when ratio exceeds limit",
     date_time = as.POSIXct("2024-12-16 12:00:00", tz = "Asia/Taipei"),
     site = "S1", analyzer = "TEST"
   )
+  result <- suppressWarnings(calculate_regression(data, ref, "CH4",
+                                 reference_time = "date_time",
+                                 site = "site", analyzer_code = "TEST",
+                                 fit_type = "auto", window_type = "fixed",
+                                 duration_minutes = 7))
+  expect_equal(result$fit_used, "linear")
+  expect_true(is.na(result$g_factor))
+})
+
+test_that("g_factor_threshold overrides ok to discard when ratio exceeds limit", {
+  elapsed <- seq(0, 419)
+  data <- data.frame(
+    real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
+                               by = "sec", length.out = 420),
+    CH4 = 2 + 0.03 * elapsed - 0.00003 * elapsed^2
+  )
+  ref <- data.frame(
+    date_time = as.POSIXct("2024-12-16 12:00:00", tz = "Asia/Taipei"),
+    site = "S1", analyzer = "TEST"
+  )
   result_no_gf <- calculate_regression(data, ref, "CH4",
                                        reference_time = "date_time",
                                        site = "site", analyzer_code = "TEST",
                                        fit_type = "auto", window_type = "fixed",
                                        duration_minutes = 7)
-  # g_factor ~0.32; threshold 0.2 triggers discard, threshold 0.5 does not
+  # g_factor ~1.72; threshold 1.5 triggers discard, threshold 2 does not
   result_triggered <- calculate_regression(data, ref, "CH4",
                                            reference_time = "date_time",
                                            site = "site", analyzer_code = "TEST",
                                            fit_type = "auto", window_type = "fixed",
                                            duration_minutes = 7,
-                                           g_factor_threshold = 0.2)
+                                           g_factor_threshold = 1.5)
   result_not_triggered <- calculate_regression(data, ref, "CH4",
                                                reference_time = "date_time",
                                                site = "site", analyzer_code = "TEST",
                                                fit_type = "auto", window_type = "fixed",
                                                duration_minutes = 7,
-                                               g_factor_threshold = 0.5)
+                                               g_factor_threshold = 2)
   expect_equal(result_no_gf$flag, "ok")
-  expect_equal(result_triggered$flag, "discard")    # g_factor ~0.32, threshold 0.2 triggers
-  expect_equal(result_not_triggered$flag, "ok")     # g_factor ~0.32, threshold 0.5 does not
+  expect_equal(result_triggered$flag, "discard")    # g_factor ~1.72, threshold 1.5 triggers
+  expect_equal(result_not_triggered$flag, "ok")     # g_factor ~1.72, threshold 2 does not
 })
 
 test_that("per-row duration_minutes overrides global parameter", {

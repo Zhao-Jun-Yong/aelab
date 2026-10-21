@@ -136,7 +136,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
     fit <- stats::lm(conc ~ elapsed_s + I(elapsed_s^2))
     list(slope = unname(stats::coef(fit)[2]), r_square = summary(fit)$r.squared,
          b_param = NA_real_, fit_used = "quadratic", residuals = stats::residuals(fit),
-         kmax_used = NA_real_)
+         kmax_used = NA_real_, curvature = unname(stats::coef(fit)[3]))
   }
 
   .exp_tz_result <- function(kmax) {
@@ -223,18 +223,35 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
     else
       1.5 / max(duration_s, 1)
 
-    # Step 2: quadratic \u2014 accept if meaningfully better (\u0394R\u00b2 > 0.01)
+    # A more complex model is accepted only if its AICc is lower (Kutzbach et al. 2007, p. 1011;
+    # Leiber-Sauheitl et al. 2014, p. 753; goFlux best.flux "AICc" criterion).
+    # k counts the fitted parameters plus the residual variance.
+    .aicc <- function(res) {
+      n <- length(res$residuals); k <- .n_fit_params(res$fit_used) + 1
+      rss <- sum(res$residuals^2)
+      if (n - k - 1 <= 0) return(NA_real_)
+      if (rss <= 0) return(-Inf)  # exact fit
+      n * log(rss / n) + 2 * k + 2 * k * (k + 1) / (n - k - 1)
+    }
+    best_aicc <- .aicc(best)
+
+    # Step 2: quadratic \u2014 accept if AICc is lower and the curve decelerates (curvature
+    # opposite in sign to the linear slope). A curve bending the other way has "no plausible
+    # physical process" and the linear model is preferred (Levy et al. 2011, Eur. J. Soil Sci.
+    # 62:811, p. 817); this also blocks t0-slope sign flips.
     quad <- .quad_result()
-    if (!is.na(quad$r_square) && !is.na(best$r_square) &&
-        quad$r_square > best$r_square + 0.01) {
+    quad_aicc <- .aicc(quad)
+    if (!is.na(quad_aicc) && !is.na(best_aicc) && quad_aicc < best_aicc &&
+        !is.na(quad$curvature) && sign(quad$curvature) == -sign(lm_slope)) {
       best <- quad
+      best_aicc <- quad_aicc
     }
 
-    # Step 3: exp_tz with kappamax \u2014 accept if \u03ba passes and meaningfully better
+    # Step 3: exp_tz with kappamax \u2014 accept if \u03ba passes and AICc is lower
     exp_res <- .exp_tz_result(kmax)
-    if (!is.null(exp_res) && !is.na(exp_res$r_square) && !is.na(best$r_square) &&
-        exp_res$r_square > best$r_square + 0.01) {
-      best <- exp_res
+    if (!is.null(exp_res)) {
+      exp_aicc <- .aicc(exp_res)
+      if (!is.na(exp_aicc) && !is.na(best_aicc) && exp_aicc < best_aicc) best <- exp_res
     }
 
     best$slope_lm  <- lm_slope
@@ -594,10 +611,11 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' @param r2_threshold Minimum R-squared for a measurement to pass quality check. Default 0.8.
 #' @param cor_threshold Minimum absolute Pearson correlation between concentration and elapsed time.
 #'   Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.
-#' @param instrument_precision Optional. Analyser precision in ppm. Used in two ways:
-#'   (1) minimum-detectable-slope check - measurements whose absolute slope falls below
-#'   \code{instrument_precision / window_duration_s} are flagged \code{"zero"} even if R\eqn{^2}
-#'   and correlation pass; (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
+#' @param instrument_precision Optional. Analyser precision (1σ) in the same concentration unit as
+#'   the \code{ghg} column (ppb for LI-COR CH4/N2O, ppm for CO2). Used in two ways:
+#'   (1) minimum-detectable-slope check - \code{below_mdf} is \code{TRUE} when the absolute slope
+#'   falls below \code{instrument_precision / window_duration_s}; the flag is not changed, because
+#'   low fluxes with a good fit are kept (Gaudard et al. 2025; Maier et al. 2022); (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
 #'   (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
 #'   fluxes permit more curvature and near-detection-limit measurements are kept linear.
 #' @param kappamax Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
@@ -618,6 +636,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   \code{g_factor} (ratio of chosen slope to linear baseline slope; \code{NA} when
 #'   \code{fit_used = "linear"} or for explicit non-auto fits),
 #'   \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),
+#'   \code{below_mdf} (\code{TRUE} when the slope is below the minimum detectable slope;
+#'   \code{NA} without \code{instrument_precision}),
 #'   \code{reference_time}, \code{site}, \code{analyzer}. When \code{window_type = "pareto"}, five
 #'   additional columns are included: \code{deadband}/\code{cutoff} (the selected candidate window,
 #'   seconds from the reference time; \code{NA} for other window types), \code{slope_uncertainty_lo}/
@@ -687,7 +707,7 @@ calculate_regression <- function(data, reference_df, ghg,
         grepl(m, analyzer_code, ignore.case = TRUE) ||
         grepl(analyzer_code, m, ignore.case = TRUE), logical(1)))
       prec_row <- if (length(hits) > 0) for_gas[hits[1], ] else for_gas[1, ]
-      instrument_precision <- prec_row$precision_ppm[1]
+      instrument_precision <- prec_row$precision[1]
     }
   }
 
@@ -838,12 +858,13 @@ calculate_regression <- function(data, reference_df, ghg,
       "discard"
     }
 
-    # Minimum detectable slope check: override "ok" if slope is within instrument noise
-    if (!is.null(instrument_precision) && flag == "ok" && !is.na(best_slope)) {
+    # Minimum detectable slope: marked, not used to override the flag. Low fluxes with a good fit
+    # are kept as such (Gaudard et al. 2025, p. 4; fluxible SI Table A1) and sub-MDF fluxes
+    # "should not be treated as zero fluxes or be discarded" (Maier et al. 2022, p. 11).
+    below_mdf <- NA
+    if (!is.null(instrument_precision) && !is.na(best_slope)) {
       duration_s <- as.numeric(difftime(best_end_dt, best_start_dt, units = "secs"))
-      if (duration_s > 0 && abs(best_slope) < instrument_precision / duration_s) {
-        flag <- "zero"
-      }
+      if (duration_s > 0) below_mdf <- abs(best_slope) < instrument_precision / duration_s
     }
 
     # g-factor: ratio of chosen slope to linear baseline slope (auto mode only).
@@ -869,6 +890,7 @@ calculate_regression <- function(data, reference_df, ghg,
       fit_used             = best_fit_used,
       g_factor             = g_factor,
       flag                 = flag,
+      below_mdf            = below_mdf,
       deadband             = deadband_out,
       cutoff               = cutoff_out,
       slope_uncertainty_lo = uncertainty_lo_out,
