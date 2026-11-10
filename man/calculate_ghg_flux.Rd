@@ -44,7 +44,7 @@ and \code{end_time} in \code{data} (as returned by \code{\link{calculate_regress
     first 30 s, maximum of the last 30 s, each clamped to the readings there, divided by the
     duration; paper p. 3, Eq. 1); the diffusion is the linear slope of the first linear
     segment of unflagged readings (paper pp. 3-4): within each unbroken run of unflagged
-    readings, in time order, a window grows from the run start (pass: >= 20 s, slope > 0,
+    readings, in time order, a window grows from the run start (pass: >= \code{min_diffusion_s}, default 20 s, slope > 0,
     adjusted R\eqn{^2} >= 0.7, p < 0.05). Passing window ends less than 10 s apart form one
     block; with one block the best adjusted R\eqn{^2} is taken, with several the last end of
     the first block (as the code archive); ebullition = total - diffusion.
@@ -92,8 +92,21 @@ silent; they were asked of the author (2026-11-10) and the defaults may change.
     code archive; not in the paper (the segment there starts one reading after the
     minimum).}
   \item{\code{neg_ebullition}}{Negative ebullition (diffusion > total): \code{"zero"}
-    (default, as the code), \code{"keep"} or \code{"na"}. The paper does not say.
-    \emph{Pending.}}
+    (default, as the code archive and Hoffmann et al. 2017, p. 112), \code{"keep"} or
+    \code{"na"}. The Minaudo paper does not say. \emph{Pending.}}
+  \item{\code{min_rise}}{Bubbles whose rise is \code{<=} this value (in the unit of
+    \code{conc}) are not bubbles. The rise is the last minus the lowest reading, from the
+    reading before the flagged segment to the one after; a falling segment has rise 0. As the
+    \code{concentration_diffusion_cutoff} of FluxSeparator (Sø et al. 2024, p. 5; 1 ppm in
+    its code, no value in the paper). Applied after the early-bubble rule, so it never
+    changes an early-bubble closure; with no bubble left the closure is
+    \code{"no bubble: rises <= min_rise"}. Default 0 (off).}
+  \item{\code{bubble_pad}}{Readings added before and after each flagged segment before the
+    diffusion segment is searched, as FluxSeparator's \code{IndexSpan} (Sø et al. 2024, p. 5;
+    30 in its code). Applied after the early-bubble rule. Default 0.}
+  \item{\code{min_diffusion_s}}{Shortest diffusion segment, in seconds. Default 20 (the
+    code archive's \code{length.min}); FluxSeparator needs more than 50 readings (Sø et al.
+    2024, p. 8).}
 }}
 }
 \value{
@@ -106,7 +119,11 @@ silent; they were asked of the author (2026-11-10) and the defaults may change.
   see \code{neg_ebullition}); \code{"ebullition < diffusion + SE"} (a review label only,
   SE = standard error of the diffusion slope: the split may come from a false bubble; the
   code archive's "ebullition too low to be trusted" uses SE x sqrt(n) instead); \code{"no linear diffusion segment"} (no segment passed; the best-R\eqn{^2} one is
-  used). Labels never change the values.
+  used); \code{"diffusion after first bubble"} (the segment starts after the first flagged
+  reading, so back-diffusion may bias it: Minaudo et al. 2026, Guideline 4, p. 10; FluxSeparator
+  uses only readings before the first bubble, Sø et al. 2024, p. 6). \code{ch4_flag} is
+  \code{"no bubble: rises <= min_rise"} when \code{min_rise} removed every bubble. Labels never
+  change the values.
 }
 \description{
 Calculate the greenhouse gas (GHG) flux based on input parameters from a data frame.
@@ -128,4 +145,12 @@ Methods}, 24, e70054. \doi{10.1002/lom3.70054}
 
 Minaudo, C. (2026). camilleminaudo/ghg-flux-expert: Code to reproduce results from Minaudo
 et al., 2026 (v1.0). Zenodo. \doi{10.5281/zenodo.18710431}
+
+Sø, J. S., et al. (2024). Self-made equipment for automatic methane diffusion and ebullition
+measurements from aquatic environments. \emph{Journal of Geophysical Research:
+Biogeosciences}, 129, e2024JG008035. \doi{10.1029/2024JG008035}
+
+Hoffmann, M., et al. (2017). A simple calculation algorithm to separate high-resolution CH4
+flux measurements into ebullition- and diffusion-derived components. \emph{Atmospheric
+Measurement Techniques}, 10, 109-118. \doi{10.5194/amt-10-109-2017}
 }

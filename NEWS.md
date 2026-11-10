@@ -14,6 +14,12 @@
   segment length, the 20 s early-bubble rule and its origin, the total-flux start, the smoothing
   and the treatment of negative ebullition. Defaults follow the paper text; where the paper and
   its code differ or the paper is silent, the setting is marked pending the author's reply.
+* Three `ch4_options` borrowed from FluxSeparator (Sø et al. 2024), off by default so results are
+  unchanged: `min_rise` (bubbles with a smaller rise are not bubbles), `bubble_pad` (readings
+  added around each bubble before the diffusion search) and `min_diffusion_s` (shortest
+  diffusion segment, default 20 s).
+* New review label `"diffusion after first bubble"` in `ch4_flag` (Minaudo et al. 2026, Guideline 4;
+  Sø et al. 2024, p. 6). Labels change no values.
 
 ## Flux QC changes (`calculate_regression()`) — slopes and flags change on re-run
 

@@ -1217,7 +1217,7 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #'       first 30 s, maximum of the last 30 s, each clamped to the readings there, divided by the
 #'       duration; paper p. 3, Eq. 1); the diffusion is the linear slope of the first linear
 #'       segment of unflagged readings (paper pp. 3-4): within each unbroken run of unflagged
-#'       readings, in time order, a window grows from the run start (pass: >= 20 s, slope > 0,
+#'       readings, in time order, a window grows from the run start (pass: >= \code{min_diffusion_s}, default 20 s, slope > 0,
 #'       adjusted R\eqn{^2} >= 0.7, p < 0.05). Passing window ends less than 10 s apart form one
 #'       block; with one block the best adjusted R\eqn{^2} is taken, with several the last end of
 #'       the first block (as the code archive); ebullition = total - diffusion.
@@ -1262,8 +1262,21 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #'       code archive; not in the paper (the segment there starts one reading after the
 #'       minimum).}
 #'     \item{\code{neg_ebullition}}{Negative ebullition (diffusion > total): \code{"zero"}
-#'       (default, as the code), \code{"keep"} or \code{"na"}. The paper does not say.
-#'       \emph{Pending.}}
+#'       (default, as the code archive and Hoffmann et al. 2017, p. 112), \code{"keep"} or
+#'       \code{"na"}. The Minaudo paper does not say. \emph{Pending.}}
+#'     \item{\code{min_rise}}{Bubbles whose rise is \code{<=} this value (in the unit of
+#'       \code{conc}) are not bubbles. The rise is the last minus the lowest reading, from the
+#'       reading before the flagged segment to the one after; a falling segment has rise 0. As the
+#'       \code{concentration_diffusion_cutoff} of FluxSeparator (Sø et al. 2024, p. 5; 1 ppm in
+#'       its code, no value in the paper). Applied after the early-bubble rule, so it never
+#'       changes an early-bubble closure; with no bubble left the closure is
+#'       \code{"no bubble: rises <= min_rise"}. Default 0 (off).}
+#'     \item{\code{bubble_pad}}{Readings added before and after each flagged segment before the
+#'       diffusion segment is searched, as FluxSeparator's \code{IndexSpan} (Sø et al. 2024, p. 5;
+#'       30 in its code). Applied after the early-bubble rule. Default 0.}
+#'     \item{\code{min_diffusion_s}}{Shortest diffusion segment, in seconds. Default 20 (the
+#'       code archive's \code{length.min}); FluxSeparator needs more than 50 readings (Sø et al.
+#'       2024, p. 8).}
 #'   }
 #' @return \code{data} with \code{flux} and \code{unit} added. With \code{ch4 = "separate"} also
 #'   \code{slope_total}, \code{slope_diffusion}, \code{slope_ebullition} (ppm s\eqn{^{-1}}),
@@ -1274,7 +1287,11 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #'   see \code{neg_ebullition}); \code{"ebullition < diffusion + SE"} (a review label only,
 #'   SE = standard error of the diffusion slope: the split may come from a false bubble; the
 #'   code archive's "ebullition too low to be trusted" uses SE x sqrt(n) instead); \code{"no linear diffusion segment"} (no segment passed; the best-R\eqn{^2} one is
-#'   used). Labels never change the values.
+#'   used); \code{"diffusion after first bubble"} (the segment starts after the first flagged
+#'   reading, so back-diffusion may bias it: Minaudo et al. 2026, Guideline 4, p. 10; FluxSeparator
+#'   uses only readings before the first bubble, Sø et al. 2024, p. 6). \code{ch4_flag} is
+#'   \code{"no bubble: rises <= min_rise"} when \code{min_rise} removed every bubble. Labels never
+#'   change the values.
 #' @references
 #' Minaudo, C., et al. (2026). Uncertainty in aquatic greenhouse gas flux estimates arises from
 #' subjective processing of floating chamber time series. \emph{Limnology and Oceanography:
@@ -1282,6 +1299,14 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #'
 #' Minaudo, C. (2026). camilleminaudo/ghg-flux-expert: Code to reproduce results from Minaudo
 #' et al., 2026 (v1.0). Zenodo. \doi{10.5281/zenodo.18710431}
+#'
+#' Sø, J. S., et al. (2024). Self-made equipment for automatic methane diffusion and ebullition
+#' measurements from aquatic environments. \emph{Journal of Geophysical Research:
+#' Biogeosciences}, 129, e2024JG008035. \doi{10.1029/2024JG008035}
+#'
+#' Hoffmann, M., et al. (2017). A simple calculation algorithm to separate high-resolution CH4
+#' flux measurements into ebullition- and diffusion-derived components. \emph{Atmospheric
+#' Measurement Techniques}, 10, 109-118. \doi{10.5194/amt-10-109-2017}
 #' @examples
 #' data <- data.frame(
 #'   slope = c(1.2, 1.5, 1.1),
@@ -1323,10 +1348,16 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   } else {
     opt <- list(bubble_window = 10, bubble_align = "centre", bubble_prob = 0.75, merge_gap = 10,
                 min_len = 5, early_s = 20, early_from = "window", total_from = "window",
-                spar = 0.5, nknots_ratio = 1/3, trim_to_min = TRUE, neg_ebullition = "zero")
+                spar = 0.5, nknots_ratio = 1/3, trim_to_min = TRUE, neg_ebullition = "zero",
+                min_rise = 0, bubble_pad = 0, min_diffusion_s = 20)
     unknown <- setdiff(names(ch4_options), names(opt))
     if (length(unknown)) stop("Unknown ch4_options: ", paste(unknown, collapse = ", "))
     opt[names(ch4_options)] <- ch4_options
+    if (!is.numeric(opt$min_rise) || length(opt$min_rise) != 1 || opt$min_rise < 0) stop("min_rise must be a number >= 0.")
+    if (!is.numeric(opt$bubble_pad) || length(opt$bubble_pad) != 1 || opt$bubble_pad < 0 ||
+        opt$bubble_pad %% 1 != 0) stop("bubble_pad must be a whole number >= 0.")
+    if (!is.numeric(opt$min_diffusion_s) || length(opt$min_diffusion_s) != 1 || opt$min_diffusion_s <= 0)
+      stop("min_diffusion_s must be a number > 0.")
     opt$bubble_align   <- match.arg(opt$bubble_align, c("centre", "start", "end"))
     opt$early_from     <- match.arg(opt$early_from, c("window", "placement"))
     opt$total_from     <- match.arg(opt$total_from, c("window", "segment"))
@@ -1382,6 +1413,21 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   r <- rle(inverse.rle(r))
   r$values[r$values & r$lengths < min_len] <- FALSE
   flag[owner] <- inverse.rle(r)
+  flag
+}
+
+# Unflag bubbles whose rise is <= min_rise. Rise as FluxSeparator's ebullitive_flux() (Sø et al.
+# 2024 p. 5): last - lowest reading, from the reading before the segment to the one after; 0 if the
+# segment falls or its lowest reading comes after its highest.
+.drop_small_bubbles <- function(conc, flag, min_rise) {
+  r <- rle(flag)
+  e <- cumsum(r$lengths)
+  b <- e - r$lengths + 1
+  for (k in which(r$values)) {
+    s <- conc[max(1, b[k] - 1):min(length(conc), e[k] + 1)]
+    rise <- if (s[1] < s[length(s)] && which.min(s) < which.max(s)) s[length(s)] - min(s) else 0
+    if (rise <= min_rise) flag[b[k]:e[k]] <- FALSE
+  }
   flag
 }
 
@@ -1448,18 +1494,29 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   flag <- .find_ch4_bubbles(conc, opt$bubble_window, opt$bubble_align, opt$bubble_prob,
                             merge_gap = opt$merge_gap, min_len = opt$min_len)
   out$n_bubbles <- sum(rle(flag)$values)
-
-  if (!any(flag)) {
+  no_bubble <- function(label) {
     s <- .lm_ch4(tt, conc)[["slope"]]
-    out[c("total", "diffusion", "ebullition", "ch4_flag")] <- list(s, s, 0, "no bubble")
-    return(out)
+    out[c("total", "diffusion", "ebullition", "ch4_flag")] <- list(s, s, 0, label)
+    out
   }
+  if (!any(flag)) return(no_bubble("no bubble"))
 
   window_total <- .total_ch4(tt, conc, opt$spar, opt$nknots_ratio)
   t_early <- if (opt$early_from == "placement") time[which(flag)[1]] - t_ref else tt[which(flag)[1]]
   if (t_early <= opt$early_s) {
     out[c("total", "ch4_flag")] <- list(window_total, "early bubble: total only")
     return(out)
+  }
+
+  # min_rise and bubble_pad act on splits only, after the early-bubble rule (FluxSeparator's
+  # concentration_diffusion_cutoff and IndexSpan, Sø et al. 2024 p. 5)
+  if (opt$min_rise > 0) {
+    flag <- .drop_small_bubbles(conc, flag, opt$min_rise)
+    out$n_bubbles <- sum(rle(flag)$values)
+    if (!any(flag)) return(no_bubble("no bubble: rises <= min_rise"))
+  }
+  if (opt$bubble_pad > 0) {
+    flag[pmin(length(flag), pmax(1, outer(which(flag), -opt$bubble_pad:opt$bubble_pad, "+")))] <- TRUE
   }
 
   excl <- flag
@@ -1471,7 +1528,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
     # CarbonIMTA, 2026-11-10)
     excl <- flag | seq_along(tt) <= early[which.min(conc[early])]
   }
-  seg <- .first_linear_ch4(tt, conc, excl)
+  seg <- .first_linear_ch4(tt, conc, excl, min_s = opt$min_diffusion_s)
   if (is.null(seg$fit)) {
     out[c("total", "ch4_flag")] <- list(window_total, "no linear diffusion segment")
     return(out)
@@ -1483,7 +1540,9 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   ebul <- out$total - d
   labels <- c("diffusion > total flux"[d > out$total],
               "ebullition < diffusion + SE"[ebul < d + seg$fit[["se"]] && d <= out$total],
-              "no linear diffusion segment"[!seg$ok])
+              "no linear diffusion segment"[!seg$ok],
+              # Sø et al. 2024 p. 6 and Minaudo et al. 2026 Guideline 4 (p. 10): diffusion after a bubble
+              "diffusion after first bubble"[seg$fit[["start"]] > tt[which(flag)[1]]])
   out$ch4_flag <- if (length(labels)) paste(labels, collapse = "; ") else "ok"
   out$diffusion <- d
   out$ebullition <- if (ebul >= 0 || opt$neg_ebullition == "keep") ebul else

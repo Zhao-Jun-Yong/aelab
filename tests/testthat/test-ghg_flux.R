@@ -310,6 +310,45 @@ test_that("ch4_options change the early-bubble origin and negative ebullition", 
                "Unknown ch4_options")
 })
 
+test_that("ch4_options min_rise, bubble_pad and min_diffusion_s", {
+  set.seed(3)
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  sec <- 0:299
+  d <- data.frame(start_time = t0, end_time = t0 + 299, area = 1, volume = 1, temp = 25)
+  run <- function(step_at, ...) {
+    ch4 <- 2 + 1e-4 * sec + ifelse(sec >= step_at, 0.05, 0) + rnorm(300, 0, 3e-4)
+    calculate_ghg_flux(d, ch4 = "separate", conc_data = data.frame(real_datetime = t0 + sec, CH4 = ch4),
+                       ch4_options = list(...))
+  }
+  set.seed(3); base <- run(100)
+  set.seed(3); same <- run(100, min_rise = 0, bubble_pad = 0, min_diffusion_s = 20)
+  expect_equal(same, base)
+
+  # a 0.05 ppm step is a bubble above min_rise 0.01, not above 0.1
+  set.seed(3); kept <- run(100, min_rise = 0.01)
+  set.seed(3); gone <- run(100, min_rise = 0.1)
+  expect_equal(kept$slope_diffusion, base$slope_diffusion)
+  expect_equal(gone$ch4_flag, "no bubble: rises <= min_rise")
+  expect_equal(gone$slope_ebullition, 0)
+  expect_equal(gone$slope_total, gone$slope_diffusion)
+
+  # padding over the whole window leaves no unflagged readings for the diffusion
+  set.seed(3); padded <- run(100, bubble_pad = 300)
+  expect_equal(padded$ch4_flag, "no linear diffusion segment")
+  expect_true(is.na(padded$slope_diffusion))
+
+  # bubble at 40 s: the run before it is long enough for 20 s, not for 60 s
+  set.seed(3); short <- run(40)
+  set.seed(3); long <- run(40, min_diffusion_s = 60)
+  expect_false(grepl("diffusion after first bubble", short$ch4_flag))
+  expect_match(long$ch4_flag, "diffusion after first bubble")
+  expect_equal(long$slope_diffusion, 1e-4, tolerance = 0.1)
+
+  expect_error(run(100, bubble_pad = 1.5), "bubble_pad")
+  expect_error(run(100, min_rise = -1), "min_rise")
+  expect_error(run(100, min_diffusion_s = 0), "min_diffusion_s")
+})
+
 test_that("convert_ghg_unit converts correctly", {
   result <- convert_ghg_unit(1, "co2", mass = "mmol")
   expect_equal(result, 44010, tolerance = 1)  # 1 mmol co2 = 44.01g/mol * 1000 µg/mg * 1000 = 44010 µg
