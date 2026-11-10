@@ -15,9 +15,9 @@ calculate_regression(
   num_rows = 300,
   fit_type = "linear",
   t_zero = 0,
-  window_type = "sliding",
+  window_type = "fixed",
   start_offset_s = 0,
-  r2_threshold = 0.8,
+  r2_threshold = 0.7,
   cor_threshold = 0.5,
   instrument_precision = NULL,
   kappamax = NULL,
@@ -66,10 +66,12 @@ by gas name. The model chosen for each measurement is recorded in the \code{fit_
 
 \item{t_zero}{Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.}
 
-\item{window_type}{\code{"sliding"} (default) selects the \code{num_rows}-length sub-window with
-  the best R\eqn{^2} within the measurement period. \code{"fixed"} fits a single window starting at
-  \code{start_offset_s} seconds after the reference time and running for \code{duration_minutes}.
-  Use \code{"fixed"} to ensure all gases are regressed over the same time window.
+\item{window_type}{\code{"fixed"} (default; \code{"sliding"} up to aelab 1.1.6)
+  fits a single window starting at \code{start_offset_s} seconds after the reference time and
+  running for \code{duration_minutes}, so all gases are regressed over the same time window.
+  \code{"sliding"} selects the \code{num_rows}-length sub-window with the best R\eqn{^2} within
+  the measurement period. \code{bubble_detection = TRUE} needs \code{"fixed"}: the other two
+  pick the best-fitting stretch, which avoids the bubbles.
   \code{"pareto"} independently searches deadband (start skip) and cutoff (window end) times,
   trading off fit quality against propagated slope uncertainty via a Pareto front - adapted
   from the window-selection idea in Kobayashi et al. (2026), with two
@@ -91,7 +93,8 @@ Only used when \code{window_type = "fixed"}. Default 0.
 When \code{reference_df} contains a \code{start_offset_s} column, the per-row value (if not
 \code{NA}) overrides this global parameter for that specific measurement.}
 
-\item{r2_threshold}{Minimum R-squared for a measurement to pass quality check. Default 0.8.}
+\item{r2_threshold}{Minimum R-squared for a measurement to pass quality check. Default 0.7
+(0.8 up to aelab 1.1.6).}
 
 \item{cor_threshold}{Minimum absolute Pearson correlation between concentration and elapsed time.
 Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.}
@@ -143,12 +146,15 @@ values to build a synthetic concentration series, and refits the same model fami
 (for CH4) splits each closure into total, diffusive and ebullitive slopes following the automated
 method of Minaudo et al. (2026, pp. 3-4, \doi{10.1002/lom3.70054}; code archive Minaudo 2026,
 \doi{10.5281/zenodo.18710431}). The split uses the readings of the closure's final window,
-after \code{window_type} has chosen it. Per closure:
+(\code{window_type = "fixed"} only). Per closure:
 \itemize{
   \item Bubbles: the concentration is divided by its mean, its variance is taken in a moving
     window of readings, and readings whose variance is above a percentile of all variances
     (minimum 1e-4) are flagged; flagged segments close together are merged and short ones
-    dropped (Minaudo et al. 2026, p. 4).
+    dropped (Minaudo et al. 2026, p. 4). Because the variance is of the raw readings, a steep
+    clean rise (above about 0.3\% of the mean concentration per reading, e.g. 2 to 6 ppm in
+    300 s at 1 Hz) is itself flagged as bubbles; removing each window's trend first was tried
+    and also hid real bubbles, so such closures are left to review (\code{review_needed}).
   \item No bubble: \code{slope} is the regression slope, as with \code{bubble_detection = FALSE};
     total = diffusion = that slope, ebullition = 0.
   \item A bubble starting within \code{early_s} seconds: total only (paper p. 4).
@@ -156,14 +162,19 @@ after \code{window_type} has chosen it. Per closure:
     first 30 s, maximum of the last 30 s, each clamped to the readings there, divided by the
     duration; paper p. 3, Eq. 1); the diffusion is the linear slope of the first linear
     segment of unflagged readings (paper pp. 3-4): within each unbroken run of unflagged
-    readings, in time order, a window grows from the run start (pass: >= \code{min_diffusion_s}, default 20 s, slope > 0,
-    adjusted R\eqn{^2} >= 0.7, p < 0.05). Passing window ends less than 10 s apart form one
+    readings, in time order, a window grows from the run start (pass: >= \code{min_diffusion_s}, default 20 s,
+    adjusted R\eqn{^2} >= 0.7, p < 0.05; slope > 0 as in the code archive, \code{find_first_linear_chunk.R}, line 44, except
+    that a run starting before the first bubble may also be negative, i.e. CH4 uptake (needs
+    \code{trim_to_min = FALSE}, else the falling start is trimmed away); a falling run after a
+    bubble is bubble gas leaving the chamber). Passing window ends less than 10 s apart form one
     block; with one block the best adjusted R\eqn{^2} is taken, with several the last end of
     the first block (as the code archive); ebullition = total - diffusion.
 }}
 
-\item{ch4_options}{Only for \code{bubble_detection = TRUE}: a named list overriding any of the
-settings below. Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
+\item{ch4_options}{Only for \code{bubble_detection = TRUE} (always checked): a named list
+overriding any of the settings below. \code{bubble_window}, \code{merge_gap},
+\code{min_len} and \code{bubble_pad} count readings, \code{early_s} and
+\code{min_diffusion_s} are seconds: at 5 s sampling a 10-reading window spans 50 s. Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
 marked \emph{pending} are where the paper and its code archive differ or the paper is
 silent; they were asked of the author (2026-11-10) and the defaults may change.
 \describe{
@@ -171,7 +182,11 @@ silent; they were asked of the author (2026-11-10) and the defaults may change.
     the code uses 11. \emph{Pending.}}
   \item{\code{bubble_align}}{Which reading a window's variance belongs to: \code{"centre"}
     (default; reading 6 of 10), \code{"start"} or \code{"end"}. The paper does not say.
-    \emph{Pending.}}
+    \emph{Pending.} Readings that no window can own are never flagged: with
+    \code{"centre"} the first \code{bubble_window \%/\% 2} and the last
+    \code{bubble_window - 1 - bubble_window \%/\% 2} (5 and 4 by default), so a bubble in
+    the last few readings is missed; with \code{"start"} the last, with \code{"end"} the first
+    \code{bubble_window - 1}.}
   \item{\code{bubble_prob}}{Percentile of the variances above which readings are flagged.
     Default 0.75 (paper); the code uses 0.7. \emph{Pending.}}
   \item{\code{merge_gap}}{Flagged segments separated by fewer than this many readings are
@@ -201,7 +216,7 @@ silent; they were asked of the author (2026-11-10) and the defaults may change.
     (default, as the code archive and Hoffmann et al. 2017, p. 112), \code{"keep"} or
     \code{"na"}. The Minaudo paper does not say. \emph{Pending.}}
   \item{\code{min_rise}}{Bubbles whose rise is \code{<=} this value (in the unit of
-    \code{ghg}) are not bubbles. The rise is the last minus the lowest reading, from the
+    \code{ghg}, so 1 ppm is 1000 for ppb data) are not bubbles. The rise is the last minus the lowest reading, from the
     reading before the flagged segment to the one after; a falling segment has rise 0. As the
     \code{concentration_diffusion_cutoff} of FluxSeparator (Sø et al. 2024, p. 5; 1 ppm in
     its code, no value in the paper). Applied after the early-bubble rule, so it never
@@ -232,18 +247,30 @@ A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\e
   for the selected window), and \code{n_candidates} (number of deadband/cutoff candidates that
   produced a usable fit; \code{0} when the measurement was flagged \code{"discard"} because no
   candidate survived).
-  With \code{bubble_detection = TRUE} also \code{slope_regression} (the regression slope),
-  \code{slope_total}, \code{slope_diffusion}, \code{slope_ebullition} (unit of \code{ghg} per
-  second), \code{n_bubbles} and \code{ch4_flag}. For closures with a bubble, \code{slope} is
-  \code{slope_total}, \code{flag} is \code{"ok"} (the R\eqn{^2} and correlation tests are for a
-  straight line, not for the two-point total; \code{r_square} and \code{correlation} still
-  describe the regression) and \code{below_mdf} is for the total. \code{ch4_flag} is \code{"no bubble"},
+  With \code{bubble_detection = TRUE} also \code{slope_regression}, \code{r_square_regression},
+  \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression} (the
+  regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}}),
+  \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error;
+  \code{NA} without a bubble), \code{slope_ebullition} (unit of \code{ghg} per second),
+  \code{diffusion_start}, \code{diffusion_end} (the diffusion segment; the window without a
+  bubble), \code{n_bubbles}, \code{ch4_flag} and \code{review_needed} (\code{TRUE} unless
+  \code{ch4_flag} is \code{"ok"}, \code{"no bubble"} or \code{"no bubble: rises <= min_rise"}).
+  For closures with a bubble, \code{slope} is
+  \code{slope_total} and \code{below_mdf} is for the total, while \code{r_square},
+  \code{correlation} and \code{flag} (same thresholds) are for the linear diffusion fit (the
+  R\eqn{^2} and correlation tests are for a straight line, not for the two-point total). With no
+  diffusion fit (\code{"early bubble: total only"}, or \code{"no linear diffusion segment"}
+  with no run long enough) they are \code{NA}; the regression's are in the \code{*_regression}
+  columns. \code{fit_used} and
+  \code{b_param} describe the regression; \code{g_factor} is \code{NA}, so
+  \code{g_factor_threshold} does not apply. \code{ch4_flag} is \code{"no bubble"},
   \code{"early bubble: total only"}, \code{"too few readings"}, \code{"ok"}, or one or more
   of these, joined by \code{"; "}: \code{"diffusion > total flux"} (ebullition was negative,
   see \code{neg_ebullition}); \code{"ebullition < diffusion + SE"} (a review label only,
   SE = standard error of the diffusion slope: the split may come from a false bubble; the
-  code archive's "ebullition too low to be trusted" uses SE x sqrt(n) instead); \code{"no linear diffusion segment"} (no segment passed; the best-R\eqn{^2} one is
-  used); \code{"diffusion after first bubble"} (the segment starts after the first flagged
+  code archive's "ebullition too low to be trusted" uses SE x sqrt(n) instead); \code{"no linear diffusion segment"} (no segment passed: the best-R\eqn{^2} one is
+  used, or, when no unflagged run of 3 or more readings lasts \code{min_diffusion_s}, diffusion
+  and ebullition are \code{NA}); \code{"diffusion after first bubble"} (the segment starts after the first flagged
   reading, so back-diffusion may bias it: Minaudo et al. 2026, Guideline 4, p. 10; FluxSeparator
   uses only readings before the first bubble, Sø et al. 2024, p. 6). \code{ch4_flag} is
   \code{"no bubble: rises <= min_rise"} when \code{min_rise} removed every bubble. Labels never
@@ -263,6 +290,16 @@ ref <- data.frame(
 calculate_regression(n2o_converted, ref, "N2O",
                      reference_time = "date_time", site = "site",
                      analyzer_code = "1074")
+
+# CH4 with a bubble at 150 s: total, diffusion and ebullition slopes
+t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+set.seed(1)
+ch4 <- data.frame(real_datetime = t0 + 0:299,
+                  CH4 = 2 + 1e-4 * (0:299) + rnorm(300, 0, 2e-4) + 0.05 * (0:299 >= 150))
+reg <- calculate_regression(ch4, data.frame(date_time = t0, site = "P1", analyzer = "a"), "CH4",
+                            reference_time = "date_time", site = "site", analyzer_code = "a",
+                            duration_minutes = 299 / 60, bubble_detection = TRUE)
+reg[, c("slope", "slope_diffusion", "slope_ebullition", "ch4_flag", "review_needed")]
 }
 \references{
 Hutchinson, G. L., & Mosier, A. R. (1981). Improved soil cover method for field measurement of

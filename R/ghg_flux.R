@@ -568,10 +568,12 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   \code{instrument_precision = NULL}, precision is looked up from \code{\link{analyzer_precision}}
 #'   by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.
 #' @param t_zero Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.
-#' @param window_type \code{"sliding"} (default) selects the \code{num_rows}-length sub-window with
-#'   the best R\eqn{^2} within the measurement period. \code{"fixed"} fits a single window starting at
-#'   \code{start_offset_s} seconds after the reference time and running for \code{duration_minutes}.
-#'   Use \code{"fixed"} to ensure all gases are regressed over the same time window.
+#' @param window_type \code{"fixed"} (default; \code{"sliding"} up to aelab 1.1.6)
+#'   fits a single window starting at \code{start_offset_s} seconds after the reference time and
+#'   running for \code{duration_minutes}, so all gases are regressed over the same time window.
+#'   \code{"sliding"} selects the \code{num_rows}-length sub-window with the best R\eqn{^2} within
+#'   the measurement period. \code{bubble_detection = TRUE} needs \code{"fixed"}: the other two
+#'   pick the best-fitting stretch, which avoids the bubbles.
 #'   \code{"pareto"} independently searches deadband (start skip) and cutoff (window end) times,
 #'   trading off fit quality against propagated slope uncertainty via a Pareto front - adapted
 #'   from the window-selection idea in Kobayashi et al. (2026), with two
@@ -609,7 +611,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   of fitted parameters for the model actually used), adds them to the candidate's fitted
 #'   values to build a synthetic concentration series, and refits the same model family via
 #'   \code{\link{calculate_regression}}'s internal fitting routine - no MCMC and no new dependency.
-#' @param r2_threshold Minimum R-squared for a measurement to pass quality check. Default 0.8.
+#' @param r2_threshold Minimum R-squared for a measurement to pass quality check. Default 0.7
+#'   (0.8 up to aelab 1.1.6).
 #' @param cor_threshold Minimum absolute Pearson correlation between concentration and elapsed time.
 #'   Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.
 #' @param instrument_precision Optional. Analyser precision (1σ) in the same concentration unit as
@@ -635,12 +638,15 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   (for CH4) splits each closure into total, diffusive and ebullitive slopes following the automated
 #'   method of Minaudo et al. (2026, pp. 3-4, \doi{10.1002/lom3.70054}; code archive Minaudo 2026,
 #'   \doi{10.5281/zenodo.18710431}). The split uses the readings of the closure's final window,
-#'   after \code{window_type} has chosen it. Per closure:
+#'   (\code{window_type = "fixed"} only). Per closure:
 #'   \itemize{
 #'     \item Bubbles: the concentration is divided by its mean, its variance is taken in a moving
 #'       window of readings, and readings whose variance is above a percentile of all variances
 #'       (minimum 1e-4) are flagged; flagged segments close together are merged and short ones
-#'       dropped (Minaudo et al. 2026, p. 4).
+#'       dropped (Minaudo et al. 2026, p. 4). Because the variance is of the raw readings, a steep
+#'       clean rise (above about 0.3\% of the mean concentration per reading, e.g. 2 to 6 ppm in
+#'       300 s at 1 Hz) is itself flagged as bubbles; removing each window's trend first was tried
+#'       and also hid real bubbles, so such closures are left to review (\code{review_needed}).
 #'     \item No bubble: \code{slope} is the regression slope, as with \code{bubble_detection = FALSE};
 #'       total = diffusion = that slope, ebullition = 0.
 #'     \item A bubble starting within \code{early_s} seconds: total only (paper p. 4).
@@ -648,13 +654,18 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'       first 30 s, maximum of the last 30 s, each clamped to the readings there, divided by the
 #'       duration; paper p. 3, Eq. 1); the diffusion is the linear slope of the first linear
 #'       segment of unflagged readings (paper pp. 3-4): within each unbroken run of unflagged
-#'       readings, in time order, a window grows from the run start (pass: >= \code{min_diffusion_s}, default 20 s, slope > 0,
-#'       adjusted R\eqn{^2} >= 0.7, p < 0.05). Passing window ends less than 10 s apart form one
+#'       readings, in time order, a window grows from the run start (pass: >= \code{min_diffusion_s}, default 20 s,
+#'       adjusted R\eqn{^2} >= 0.7, p < 0.05; slope > 0 as in the code archive, \code{find_first_linear_chunk.R}, line 44, except
+#'       that a run starting before the first bubble may also be negative, i.e. CH4 uptake (needs
+#'       \code{trim_to_min = FALSE}, else the falling start is trimmed away); a falling run after a
+#'       bubble is bubble gas leaving the chamber). Passing window ends less than 10 s apart form one
 #'       block; with one block the best adjusted R\eqn{^2} is taken, with several the last end of
 #'       the first block (as the code archive); ebullition = total - diffusion.
 #'   }
-#' @param ch4_options Only for \code{bubble_detection = TRUE}: a named list overriding any of the
-#'   settings below. Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
+#' @param ch4_options Only for \code{bubble_detection = TRUE} (always checked): a named list
+#'   overriding any of the settings below. \code{bubble_window}, \code{merge_gap},
+#'   \code{min_len} and \code{bubble_pad} count readings, \code{early_s} and
+#'   \code{min_diffusion_s} are seconds: at 5 s sampling a 10-reading window spans 50 s. Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
 #'   marked \emph{pending} are where the paper and its code archive differ or the paper is
 #'   silent; they were asked of the author (2026-11-10) and the defaults may change.
 #'   \describe{
@@ -662,7 +673,11 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'       the code uses 11. \emph{Pending.}}
 #'     \item{\code{bubble_align}}{Which reading a window's variance belongs to: \code{"centre"}
 #'       (default; reading 6 of 10), \code{"start"} or \code{"end"}. The paper does not say.
-#'       \emph{Pending.}}
+#'       \emph{Pending.} Readings that no window can own are never flagged: with
+#'       \code{"centre"} the first \code{bubble_window \%/\% 2} and the last
+#'       \code{bubble_window - 1 - bubble_window \%/\% 2} (5 and 4 by default), so a bubble in
+#'       the last few readings is missed; with \code{"start"} the last, with \code{"end"} the first
+#'       \code{bubble_window - 1}.}
 #'     \item{\code{bubble_prob}}{Percentile of the variances above which readings are flagged.
 #'       Default 0.75 (paper); the code uses 0.7. \emph{Pending.}}
 #'     \item{\code{merge_gap}}{Flagged segments separated by fewer than this many readings are
@@ -692,7 +707,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'       (default, as the code archive and Hoffmann et al. 2017, p. 112), \code{"keep"} or
 #'       \code{"na"}. The Minaudo paper does not say. \emph{Pending.}}
 #'     \item{\code{min_rise}}{Bubbles whose rise is \code{<=} this value (in the unit of
-#'       \code{ghg}) are not bubbles. The rise is the last minus the lowest reading, from the
+#'       \code{ghg}, so 1 ppm is 1000 for ppb data) are not bubbles. The rise is the last minus the lowest reading, from the
 #'       reading before the flagged segment to the one after; a falling segment has rise 0. As the
 #'       \code{concentration_diffusion_cutoff} of FluxSeparator (Sø et al. 2024, p. 5; 1 ppm in
 #'       its code, no value in the paper). Applied after the early-bubble rule, so it never
@@ -721,18 +736,30 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   for the selected window), and \code{n_candidates} (number of deadband/cutoff candidates that
 #'   produced a usable fit; \code{0} when the measurement was flagged \code{"discard"} because no
 #'   candidate survived).
-#'   With \code{bubble_detection = TRUE} also \code{slope_regression} (the regression slope),
-#'   \code{slope_total}, \code{slope_diffusion}, \code{slope_ebullition} (unit of \code{ghg} per
-#'   second), \code{n_bubbles} and \code{ch4_flag}. For closures with a bubble, \code{slope} is
-#'   \code{slope_total}, \code{flag} is \code{"ok"} (the R\eqn{^2} and correlation tests are for a
-#'   straight line, not for the two-point total; \code{r_square} and \code{correlation} still
-#'   describe the regression) and \code{below_mdf} is for the total. \code{ch4_flag} is \code{"no bubble"},
+#'   With \code{bubble_detection = TRUE} also \code{slope_regression}, \code{r_square_regression},
+#'   \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression} (the
+#'   regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}}),
+#'   \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error;
+#'   \code{NA} without a bubble), \code{slope_ebullition} (unit of \code{ghg} per second),
+#'   \code{diffusion_start}, \code{diffusion_end} (the diffusion segment; the window without a
+#'   bubble), \code{n_bubbles}, \code{ch4_flag} and \code{review_needed} (\code{TRUE} unless
+#'   \code{ch4_flag} is \code{"ok"}, \code{"no bubble"} or \code{"no bubble: rises <= min_rise"}).
+#'   For closures with a bubble, \code{slope} is
+#'   \code{slope_total} and \code{below_mdf} is for the total, while \code{r_square},
+#'   \code{correlation} and \code{flag} (same thresholds) are for the linear diffusion fit (the
+#'   R\eqn{^2} and correlation tests are for a straight line, not for the two-point total). With no
+#'   diffusion fit (\code{"early bubble: total only"}, or \code{"no linear diffusion segment"}
+#'   with no run long enough) they are \code{NA}; the regression's are in the \code{*_regression}
+#'   columns. \code{fit_used} and
+#'   \code{b_param} describe the regression; \code{g_factor} is \code{NA}, so
+#'   \code{g_factor_threshold} does not apply. \code{ch4_flag} is \code{"no bubble"},
 #'   \code{"early bubble: total only"}, \code{"too few readings"}, \code{"ok"}, or one or more
 #'   of these, joined by \code{"; "}: \code{"diffusion > total flux"} (ebullition was negative,
 #'   see \code{neg_ebullition}); \code{"ebullition < diffusion + SE"} (a review label only,
 #'   SE = standard error of the diffusion slope: the split may come from a false bubble; the
-#'   code archive's "ebullition too low to be trusted" uses SE x sqrt(n) instead); \code{"no linear diffusion segment"} (no segment passed; the best-R\eqn{^2} one is
-#'   used); \code{"diffusion after first bubble"} (the segment starts after the first flagged
+#'   code archive's "ebullition too low to be trusted" uses SE x sqrt(n) instead); \code{"no linear diffusion segment"} (no segment passed: the best-R\eqn{^2} one is
+#'   used, or, when no unflagged run of 3 or more readings lasts \code{min_diffusion_s}, diffusion
+#'   and ebullition are \code{NA}); \code{"diffusion after first bubble"} (the segment starts after the first flagged
 #'   reading, so back-diffusion may bias it: Minaudo et al. 2026, Guideline 4, p. 10; FluxSeparator
 #'   uses only readings before the first bubble, Sø et al. 2024, p. 6). \code{ch4_flag} is
 #'   \code{"no bubble: rises <= min_rise"} when \code{min_rise} removed every bubble. Labels never
@@ -787,14 +814,24 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' calculate_regression(n2o_converted, ref, "N2O",
 #'                      reference_time = "date_time", site = "site",
 #'                      analyzer_code = "1074")
+#'
+#' # CH4 with a bubble at 150 s: total, diffusion and ebullition slopes
+#' t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+#' set.seed(1)
+#' ch4 <- data.frame(real_datetime = t0 + 0:299,
+#'                   CH4 = 2 + 1e-4 * (0:299) + rnorm(300, 0, 2e-4) + 0.05 * (0:299 >= 150))
+#' reg <- calculate_regression(ch4, data.frame(date_time = t0, site = "P1", analyzer = "a"), "CH4",
+#'                             reference_time = "date_time", site = "site", analyzer_code = "a",
+#'                             duration_minutes = 299 / 60, bubble_detection = TRUE)
+#' reg[, c("slope", "slope_diffusion", "slope_ebullition", "ch4_flag", "review_needed")]
 #' @export
 
 calculate_regression <- function(data, reference_df, ghg,
                                  reference_time, site, analyzer_code,
                                  duration_minutes = 7, num_rows = 300,
                                  fit_type = "linear", t_zero = 0,
-                                 window_type = "sliding", start_offset_s = 0,
-                                 r2_threshold = 0.8, cor_threshold = 0.5,
+                                 window_type = "fixed", start_offset_s = 0,
+                                 r2_threshold = 0.7, cor_threshold = 0.5,
                                  instrument_precision = NULL,
                                  kappamax = NULL,
                                  g_factor_threshold = NULL,
@@ -805,7 +842,10 @@ calculate_regression <- function(data, reference_df, ghg,
   fit_type    <- match.arg(fit_type,    c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
   window_type <- match.arg(window_type, c("sliding", "fixed", "pareto"))
   if (!isTRUE(bubble_detection) && !isFALSE(bubble_detection)) stop("bubble_detection must be TRUE or FALSE.")
-  if (bubble_detection) ch4_opt <- .ch4_options(ch4_options)
+  ch4_opt <- .ch4_options(ch4_options)  # checked even when unused, to catch typos
+  if (bubble_detection && window_type != "fixed")
+    stop("bubble_detection = TRUE needs window_type = \"fixed\": sliding and pareto windows pick ",
+         "the best-fitting stretch, which avoids the bubbles.")
 
   # For fit_type = "auto" (kappamax) or window_type = "pareto" (fit_score sigma + bootstrap),
   # resolve instrument_precision from the built-in table if not supplied. Try to match by model
@@ -858,6 +898,9 @@ calculate_regression <- function(data, reference_df, ghg,
     filtered_data <- data[valid_rows & data$real_datetime >= start_time &
                             data$real_datetime <= end_time, ]
     sorted_data   <- filtered_data[order(filtered_data$real_datetime), ]
+    if (anyDuplicated(sorted_data$real_datetime))
+      warning("Duplicated timestamps for ", reference_site[i], ": does `data` hold more than one ",
+              "analyzer? Pass one analyzer's readings per call.", call. = FALSE)
 
     best_r_square  <- -Inf
     best_slope     <- NA_real_
@@ -956,17 +999,12 @@ calculate_regression <- function(data, reference_df, ghg,
     # Quality flag: correlation threshold distinguishes "zero" (no trend) from "discard" (poor fit).
     # For window_type = "pareto", an empty admitted-candidate pool is reported as "discard" rather
     # than falling through to "no_data" (data existed; no candidate window survived the fit).
-    flag <- if (force_discard) {
-      "discard"
-    } else if (is.na(best_cor) || is.infinite(best_r_square)) {
-      "no_data"
-    } else if (abs(best_cor) < cor_threshold) {
-      "zero"
-    } else if (best_r_square >= r2_threshold) {
-      "ok"
-    } else {
-      "discard"
+    qc_flag <- function(cor, r2) {
+      # cor is NA with a fit but constant readings: no trend, so "zero"
+      if (is.na(r2) || is.infinite(r2)) "no_data" else if (is.na(cor) || abs(cor) < cor_threshold) "zero" else
+        if (r2 >= r2_threshold) "ok" else "discard"
     }
+    flag <- if (force_discard) "discard" else qc_flag(best_cor, best_r_square)
 
     # Minimum detectable slope: marked, not used to override the flag. Low fluxes with a good fit
     # are kept as such (Gaudard et al. 2025, p. 4; fluxible SI Table A1) and sub-MDF fluxes
@@ -998,15 +1036,23 @@ calculate_regression <- function(data, reference_df, ghg,
       split <- .separate_ch4(as.numeric(win$real_datetime), as.numeric(win[[ghg]]), ch4_opt,
                              as.numeric(reference_datetime))
       split$regression <- best_slope
+      reg_qc <- list(r_square = best_r_square, correlation = best_cor, flag = flag, g_factor = g_factor)
       if (startsWith(split$ch4_flag, "no bubble")) {
         split$total <- split$diffusion <- best_slope  # keep the regression's own fit
+        split$diff_start <- as.numeric(best_start_dt)
+        split$diff_end <- as.numeric(best_end_dt)
       } else if (!is.na(split$total)) {
         best_slope <- split$total
-        if (flag != "no_data") flag <- "ok"
-        if (!is.null(instrument_precision)) {
-          duration_s <- as.numeric(difftime(best_end_dt, best_start_dt, units = "secs"))
-          below_mdf <- if (duration_s > 0) abs(best_slope) < instrument_precision / duration_s else NA
+        g_factor <- NA_real_  # describes the regression curve, no longer the reported slope
+        # flag, r_square and correlation always describe the diffusion line; NA when there is
+        # none (total only), the regression's stay in *_regression
+        if (flag != "no_data") {
+          best_r_square <- split$diff_r2
+          best_cor <- split$diff_cor
+          flag <- if (is.na(split$diff_r2)) NA_character_ else qc_flag(best_cor, best_r_square)
         }
+        if (!is.null(instrument_precision))
+          below_mdf <- if (split$total_s > 0) abs(best_slope) < instrument_precision / split$total_s else NA
       }
     }
 
@@ -1032,9 +1078,15 @@ calculate_regression <- function(data, reference_df, ghg,
     )
     if (!is.null(split)) {
       out <- dplyr::bind_cols(out, tibble(
-        slope_regression = split$regression, slope_total = split$total,
-        slope_diffusion = split$diffusion, slope_ebullition = split$ebullition,
-        n_bubbles = split$n_bubbles, ch4_flag = split$ch4_flag))
+        slope_regression = split$regression, r_square_regression = reg_qc$r_square,
+        correlation_regression = reg_qc$correlation, flag_regression = reg_qc$flag,
+        g_factor_regression = reg_qc$g_factor, slope_total = split$total,
+        slope_diffusion = split$diffusion, slope_diffusion_se = split$diff_se,
+        slope_ebullition = split$ebullition,
+        diffusion_start = format(as.POSIXct(split$diff_start, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
+        diffusion_end = format(as.POSIXct(split$diff_end, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
+        n_bubbles = split$n_bubbles, ch4_flag = split$ch4_flag,
+        review_needed = !split$ch4_flag %in% c("ok", "no bubble", "no bubble: rises <= min_rise")))
     }
     out
   })
@@ -1166,10 +1218,82 @@ make_reference <- function(date,
   }
 }
 
+#' @title apply_ch4_review
+#' @description Apply review decisions to CH4 closures split by
+#'   \code{calculate_regression(bubble_detection = TRUE)}, typically the ones with
+#'   \code{review_needed = TRUE}. Values are only changed here, by the decisions given.
+#' @param regression_result Output of \code{calculate_regression(bubble_detection = TRUE)}.
+#' @param decisions Data frame with the \code{by} columns and \code{decision}, one row per closure:
+#'   \describe{
+#'     \item{\code{"accept"}}{Keep the split as it is.}
+#'     \item{\code{"total"}}{Total only: \code{slope} is \code{slope_total}; diffusion and
+#'       ebullition are \code{NA}.}
+#'     \item{\code{"not_bubble"}}{Use the regression fit as for a closure without a bubble:
+#'       \code{slope}, \code{r_square}, \code{correlation}, \code{flag} and \code{g_factor} come
+#'       from the \code{*_regression} columns, total = diffusion = \code{slope_regression},
+#'       ebullition = 0, and the diffusion segment is the whole window.}
+#'     \item{\code{"discard"}}{\code{flag} is \code{"discard"}; values are kept.}
+#'   }
+#'   Other columns (e.g. a note) are ignored. To rerun a closure with other \code{ch4_options},
+#'   call \code{calculate_regression()} with only its row of \code{reference_df} instead.
+#' @param by Columns identifying a closure in both tables. Default \code{c("site",
+#'   "reference_time")}; a character \code{reference_time} in \code{decisions} is read as
+#'   Asia/Taipei time.
+#' @return \code{regression_result} with the decisions applied and a \code{ch4_decision} column:
+#'   the decision, \code{"unreviewed"} for \code{review_needed} closures without one, or
+#'   \code{"auto"}.
+#' @examples
+#' t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+#' set.seed(1)
+#' ch4 <- data.frame(real_datetime = t0 + 0:299,
+#'                   CH4 = 2 + 1e-4 * (0:299) + rnorm(300, 0, 2e-4) + 0.05 * (0:299 >= 150))
+#' reg <- calculate_regression(ch4, data.frame(date_time = t0, site = "P1", analyzer = "a"), "CH4",
+#'                             reference_time = "date_time", site = "site", analyzer_code = "a",
+#'                             duration_minutes = 299 / 60, bubble_detection = TRUE)
+#' dec <- data.frame(site = "P1", reference_time = "2024-01-01 08:00:00", decision = "not_bubble")
+#' apply_ch4_review(reg, dec)[, c("slope", "slope_ebullition", "flag", "ch4_decision")]
+#' @export
+apply_ch4_review <- function(regression_result, decisions, by = c("site", "reference_time")) {
+  reg <- regression_result
+  if (!"review_needed" %in% names(reg))
+    stop("regression_result needs the columns of calculate_regression(bubble_detection = TRUE).")
+  miss <- setdiff(c(by, "decision"), names(decisions))
+  if (length(miss)) stop("decisions is missing: ", paste(miss, collapse = ", "))
+  if (length(setdiff(by, names(reg)))) stop("regression_result is missing: ", paste(setdiff(by, names(reg)), collapse = ", "))
+  bad <- setdiff(decisions$decision, c("accept", "total", "not_bubble", "discard"))
+  if (length(bad)) stop("Unknown decision: ", paste(bad, collapse = ", "),
+                        ". Use accept, total, not_bubble or discard.")
+  if ("reference_time" %in% by && !inherits(decisions$reference_time, "POSIXct"))
+    decisions$reference_time <- as.POSIXct(as.character(decisions$reference_time), tz = "Asia/Taipei")
+  if ("reference_time" %in% by) reg$reference_time <- lubridate::force_tz(reg$reference_time, "Asia/Taipei")
+  key <- function(d) do.call(paste, c(lapply(by, function(b) as.character(d[[b]])), sep = "\r"))
+  k_reg <- key(reg); k_dec <- key(decisions)
+  if (anyDuplicated(k_dec)) stop("More than one decision for a closure.")
+  unmatched <- !k_dec %in% k_reg
+  if (any(unmatched)) warning(sum(unmatched), " decision(s) match no closure.", call. = FALSE)
+  d <- decisions$decision[match(k_reg, k_dec)]
+
+  tot <- d %in% "total"
+  reg$slope[tot] <- reg$slope_total[tot]
+  reg[tot, c("slope_diffusion", "slope_diffusion_se", "slope_ebullition")] <- NA_real_
+  nb <- d %in% "not_bubble"
+  for (x in c("r_square", "correlation", "flag", "g_factor")) reg[[x]][nb] <- reg[[paste0(x, "_regression")]][nb]
+  reg$slope[nb] <- reg$slope_total[nb] <- reg$slope_diffusion[nb] <- reg$slope_regression[nb]
+  reg$slope_ebullition[nb] <- 0
+  reg$slope_diffusion_se[nb] <- NA_real_
+  reg$diffusion_start[nb] <- reg$start_time[nb]
+  reg$diffusion_end[nb] <- reg$end_time[nb]
+  reg$flag[d %in% "discard"] <- "discard"
+  reg$ch4_decision <- ifelse(!is.na(d), d, ifelse(reg$review_needed, "unreviewed", "auto"))
+  reg
+}
+
 #' @title plot_ghg_flux
 #' @description Plot GHG concentration over time for each measurement window, overlaid with the
 #'   fitted regression line and colored by quality flag. Use this for visual QC of
-#'   \code{\link{calculate_regression}} output.
+#'   \code{\link{calculate_regression}} output. For CH4 closures split with
+#'   \code{bubble_detection = TRUE}, the line is the linear diffusion fit over its segment and the
+#'   panel title adds the diffusion slope and \code{ch4_flag}.
 #' @param data Analyzer data processed by \code{tidy_ghg_analyzer()} and \code{convert_time()}.
 #' @param regression_result Output tibble from \code{calculate_regression()}.
 #' @param ghg Column name in \code{data} for the gas concentration (e.g. \code{"CH4"}, \code{"N2O"}).
@@ -1211,20 +1335,28 @@ plot_ghg_flux <- function(data, regression_result, ghg,
     data$real_datetime <- lubridate::force_tz(data$real_datetime, tzone = "Asia/Taipei")
   }
 
+  # bubble closures from calculate_regression(bubble_detection = TRUE): the diffusion line is drawn
+  is_split <- function(row) "ch4_flag" %in% names(row) && !startsWith(row$ch4_flag, "no bubble") &&
+    !is.na(row$diffusion_start)
+  label_of <- function(row) {
+    slope_lbl <- if (!is.na(row$slope))    formatC(row$slope,    digits = 5, format = "g") else "NA"
+    r2_lbl    <- if (!is.na(row$r_square)) round(row$r_square, 3)                          else "NA"
+    lbl <- paste0(row$site, "\nslope=", slope_lbl, "  R\u00b2=", r2_lbl, "  [", row$flag, "]")
+    if (is_split(row)) lbl <- paste0(lbl, "\ndiffusion=", formatC(row$slope_diffusion, digits = 3, format = "g"),
+                                     "  {", row$ch4_flag, "}")
+    lbl
+  }
+
   # Build per-measurement window and fitted-line data
   window_list <- vector("list", nrow(regression_result))
   fitted_list <- vector("list", nrow(regression_result))
 
   for (i in seq_len(nrow(regression_result))) {
     row  <- regression_result[i, ]
-    site <- row$site
     flag <- row$flag
     st   <- as.POSIXct(row$start_time, format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
     et   <- as.POSIXct(row$end_time,   format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
-
-    slope_label <- if (!is.na(row$slope))    formatC(row$slope,    digits = 5, format = "g") else "NA"
-    r2_label    <- if (!is.na(row$r_square)) round(row$r_square, 3)                          else "NA"
-    site_label  <- paste0(site, "\nslope=", slope_label, "  R\u00b2=", r2_label, "  [", flag, "]")
+    site_label <- label_of(row)
 
     empty_win <- data.frame(site_label = character(0), elapsed_s = numeric(0),
                             conc = numeric(0), flag = character(0),
@@ -1260,7 +1392,14 @@ plot_ghg_flux <- function(data, regression_result, ghg,
     C0          <- conc_vec[1]
     Cm_start    <- conc_vec[length(conc_vec)]
 
-    if (fit_type == "linear") {
+    if (is_split(row)) {
+      ds <- as.POSIXct(row$diffusion_start, format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
+      de <- as.POSIXct(row$diffusion_end,   format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
+      seg <- win$real_datetime >= ds & win$real_datetime <= de
+      elapsed_seq <- seq(min(elapsed_s[seg]), max(elapsed_s[seg]), length.out = 200)
+      fit    <- stats::lm(y ~ x, data.frame(x = elapsed_s[seg], y = conc_vec[seg]))
+      fitted <- stats::predict(fit, newdata = data.frame(x = elapsed_seq))
+    } else if (fit_type == "linear") {
       fit    <- stats::lm(conc_vec ~ elapsed_s)
       fitted <- stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq))
     } else if (fit_type == "quadratic") {
@@ -1299,14 +1438,8 @@ plot_ghg_flux <- function(data, regression_result, ghg,
   if (nrow(all_windows) == 0) return(NULL)
 
   # Preserve site_label order as it appears in regression_result
-  site_label_order <- vapply(seq_len(nrow(regression_result)), function(i) {
-    row        <- regression_result[i, ]
-    site       <- row$site
-    flag       <- row$flag
-    slope_lbl  <- if (!is.na(row$slope))    formatC(row$slope,    digits = 5, format = "g") else "NA"
-    r2_lbl     <- if (!is.na(row$r_square)) round(row$r_square, 3)                          else "NA"
-    paste0(site, "\nslope=", slope_lbl, "  R\u00b2=", r2_lbl, "  [", flag, "]")
-  }, character(1))
+  site_label_order <- vapply(seq_len(nrow(regression_result)),
+                             function(i) label_of(regression_result[i, ]), character(1))
 
   all_windows$site_label <- factor(all_windows$site_label, levels = unique(site_label_order))
   all_fitted$site_label  <- factor(all_fitted$site_label,  levels = unique(site_label_order))
@@ -1338,7 +1471,8 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #' @return \code{data} with \code{flux} and \code{unit} added. When \code{data} has
 #'   \code{slope_diffusion} and \code{slope_ebullition} (from
 #'   \code{calculate_regression(bubble_detection = TRUE)}), \code{flux_diffusion} and
-#'   \code{flux_ebullition} are added too; \code{flux} is then the total CH4 flux, because
+#'   \code{flux_ebullition} are added too (and \code{flux_diffusion_se} from
+#'   \code{slope_diffusion_se}); \code{flux} is then the total CH4 flux, because
 #'   \code{slope} holds the total slope for closures with a bubble.
 #' @examples
 #' data <- data.frame(
@@ -1374,7 +1508,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 
   data$flux <- to_flux(data[[slope]])
   # CH4 split from calculate_regression(bubble_detection = TRUE)
-  for (part in c("diffusion", "ebullition")) {
+  for (part in c("diffusion", "diffusion_se", "ebullition")) {
     if (paste0("slope_", part) %in% names(data)) data[[paste0("flux_", part)]] <- to_flux(data[[paste0("slope_", part)]])
   }
 
@@ -1390,14 +1524,25 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
               min_len = 5, early_s = 20, early_from = "window", total_from = "window",
               spar = 0.5, nknots_ratio = 1/3, trim_to_min = TRUE, neg_ebullition = "zero",
               min_rise = 0, bubble_pad = 0, min_diffusion_s = 20)
+  if (!is.list(ch4_options)) stop("ch4_options must be a named list.")
+  if (length(ch4_options) && (is.null(names(ch4_options)) || any(names(ch4_options) == "")))
+    stop("Every ch4_options element needs a name.")
   unknown <- setdiff(names(ch4_options), names(opt))
   if (length(unknown)) stop("Unknown ch4_options: ", paste(unknown, collapse = ", "))
   opt[names(ch4_options)] <- ch4_options
-  if (!is.numeric(opt$min_rise) || length(opt$min_rise) != 1 || opt$min_rise < 0) stop("min_rise must be a number >= 0.")
-  if (!is.numeric(opt$bubble_pad) || length(opt$bubble_pad) != 1 || opt$bubble_pad < 0 ||
-      opt$bubble_pad %% 1 != 0) stop("bubble_pad must be a whole number >= 0.")
-  if (!is.numeric(opt$min_diffusion_s) || length(opt$min_diffusion_s) != 1 || opt$min_diffusion_s <= 0)
-    stop("min_diffusion_s must be a number > 0.")
+  num <- function(x, lo, hi = Inf, whole = FALSE, lo_open = FALSE) {
+    v <- opt[[x]]
+    ok <- is.numeric(v) && length(v) == 1 && !is.na(v) && v <= hi && (if (lo_open) v > lo else v >= lo) &&
+      (!whole || v %% 1 == 0)
+    if (!ok) stop(x, " must be a ", if (whole) "whole " else "", "number ", if (lo_open) "> " else ">= ", lo,
+                  if (is.finite(hi)) paste0(" and <= ", hi) else "", ".", call. = FALSE)
+  }
+  num("bubble_window", 2, whole = TRUE); num("bubble_prob", 0, 1, lo_open = TRUE)
+  num("merge_gap", 0, whole = TRUE); num("min_len", 1, whole = TRUE); num("early_s", 0)
+  num("spar", 0, lo_open = TRUE); num("nknots_ratio", 0, 1, lo_open = TRUE); num("min_rise", 0)
+  num("bubble_pad", 0, whole = TRUE); num("min_diffusion_s", 0, lo_open = TRUE)
+  for (x in "trim_to_min")
+    if (!isTRUE(opt[[x]]) && !isFALSE(opt[[x]])) stop(x, " must be TRUE or FALSE.", call. = FALSE)
   opt$bubble_align   <- match.arg(opt$bubble_align, c("centre", "start", "end"))
   opt$early_from     <- match.arg(opt$early_from, c("window", "placement"))
   opt$total_from     <- match.arg(opt$total_from, c("window", "segment"))
@@ -1441,19 +1586,19 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 }
 
 .lm_ch4 <- function(t, conc) {
-  f <- summary(stats::lm(conc ~ t))
+  f <- suppressWarnings(summary(stats::lm(conc ~ t)))  # "essentially perfect fit" on flat stretches
   c(slope = f$coefficients[2, 1], r2 = f$adj.r.squared, p = f$coefficients[2, 4], se = f$coefficients[2, 2])
 }
 
 # First linear segment (>= min_s) of unflagged readings: within each unbroken run, in time order,
-# grow a window from the run start; window ends passing slope > 0, adj. R2 >= 0.7, p < 0.05
+# grow a window from the run start; window ends passing adj. R2 >= 0.7, p < 0.05, slope > 0 (any sign before the first bubble)
 # that are < 10 s apart form one block: one block -> best adj. R2, several -> last end of the
 # first block (as the code archive; it reproduced 5 of 6 changed eye-accepted CarbonIMTA splits
 # exactly, 2026-11-10). If none passes, the best-R2 window of the
 # first long-enough run (ok = FALSE); fit = NULL when no run is long enough.
 # The code archive's 100 s moving-window rising-slope check is not used: with trim_to_min on it
 # changed no diffusion value (> 1%) in 97 bubbly CarbonIMTA closures (2026-11-10).
-.first_linear_ch4 <- function(t, conc, flag, min_s = 20, gap_s = 10) {
+.first_linear_ch4 <- function(t, conc, flag, min_s = 20, gap_s = 10, t_bubble = Inf) {
   r <- rle(!flag)
   ends <- cumsum(r$lengths)
   starts <- ends - r$lengths + 1
@@ -1461,11 +1606,14 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   for (k in which(r$values)) {
     idx <- starts[k]:ends[k]
     tt <- t[idx]
-    if (max(tt) - tt[1] < min_s) next
-    js <- which(tt - tt[1] >= min_s)
+    if (length(tt) < 3 || max(tt) - tt[1] < min_s) next
+    js <- which(tt - tt[1] >= min_s & seq_along(tt) >= 3)  # a 2-point line has no R2 or p
     fits <- t(vapply(js, function(j) .lm_ch4(tt[1:j], conc[idx[1:j]]), numeric(4)))
     fits <- cbind(fits, start = tt[1], end = tt[js])
-    pass <- fits[, "slope"] > 0 & fits[, "r2"] >= 0.7 & fits[, "p"] < 0.05
+    # negative slopes (CH4 uptake) only before the first bubble: after one, a falling stretch is
+    # bubble gas leaving the chamber, not uptake (5 of 160 CarbonIMTA closures otherwise)
+    pass <- (fits[, "slope"] > 0 | tt[1] < t_bubble) & fits[, "r2"] >= 0.7 & fits[, "p"] < 0.05
+    pass[is.na(pass)] <- FALSE
     if (any(pass)) {
       ok_i <- which(pass)
       brk <- which(diff(fits[ok_i, "end"]) > gap_s)
@@ -1492,7 +1640,9 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 # time in seconds; t_ref = placement time for early_from = "placement".
 .separate_ch4 <- function(time, conc, opt, t_ref = NA_real_) {
   out <- data.frame(total = NA_real_, diffusion = NA_real_, ebullition = NA_real_,
-                    n_bubbles = NA_integer_, ch4_flag = "too few readings")
+                    n_bubbles = NA_integer_, ch4_flag = "too few readings",
+                    diff_r2 = NA_real_, diff_cor = NA_real_, diff_se = NA_real_,
+                    diff_start = NA_real_, diff_end = NA_real_, total_s = NA_real_)
   o <- order(time)
   time <- time[o]; conc <- conc[o]
   keep <- !duplicated(time)
@@ -1511,6 +1661,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   if (!any(flag)) return(no_bubble("no bubble"))
 
   window_total <- .total_ch4(tt, conc, opt$spar, opt$nknots_ratio)
+  out$total_s <- max(tt)
   t_early <- if (opt$early_from == "placement") time[which(flag)[1]] - t_ref else tt[which(flag)[1]]
   if (t_early <= opt$early_s) {
     out[c("total", "ch4_flag")] <- list(window_total, "early bubble: total only")
@@ -1537,15 +1688,17 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
     # CarbonIMTA, 2026-11-10)
     excl <- flag | seq_along(tt) <= early[which.min(conc[early])]
   }
-  seg <- .first_linear_ch4(tt, conc, excl, min_s = opt$min_diffusion_s)
+  seg <- .first_linear_ch4(tt, conc, excl, min_s = opt$min_diffusion_s, t_bubble = tt[which(flag)[1]])
   if (is.null(seg$fit)) {
     out[c("total", "ch4_flag")] <- list(window_total, "no linear diffusion segment")
     return(out)
   }
   d <- seg$fit[["slope"]]
   from <- tt >= seg$fit[["start"]]
-  out$total <- if (opt$total_from == "segment" && sum(from) >= 20)
-    .total_ch4(tt[from], conc[from], opt$spar, opt$nknots_ratio) else window_total
+  if (opt$total_from == "segment" && sum(from) >= 20) {
+    out$total <- .total_ch4(tt[from], conc[from], opt$spar, opt$nknots_ratio)
+    out$total_s <- max(tt) - seg$fit[["start"]]
+  } else out$total <- window_total
   ebul <- out$total - d
   labels <- c("diffusion > total flux"[d > out$total],
               "ebullition < diffusion + SE"[ebul < d + seg$fit[["se"]] && d <= out$total],
@@ -1554,6 +1707,12 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
               "diffusion after first bubble"[seg$fit[["start"]] > tt[which(flag)[1]]])
   out$ch4_flag <- if (length(labels)) paste(labels, collapse = "; ") else "ok"
   out$diffusion <- d
+  seg_i <- !excl & tt >= seg$fit[["start"]] & tt <= seg$fit[["end"]]
+  out$diff_cor <- stats::cor(tt[seg_i], conc[seg_i])
+  out$diff_r2 <- out$diff_cor^2
+  out$diff_se <- seg$fit[["se"]]
+  out$diff_start <- time[1] + seg$fit[["start"]]
+  out$diff_end <- time[1] + seg$fit[["end"]]
   out$ebullition <- if (ebul >= 0 || opt$neg_ebullition == "keep") ebul else
     if (opt$neg_ebullition == "zero") 0 else NA_real_
   out

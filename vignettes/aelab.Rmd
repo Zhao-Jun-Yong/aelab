@@ -74,13 +74,13 @@ Now, we can perform regressions on the GHG concentrations using `calculate_regre
 
 Two window modes are available via `window_type`:
 
-- **`"sliding"`** (default): moves a fixed-length sub-window (default `num_rows = 300` rows ≈ 5 min) across the full measurement period and keeps the position with the highest R². Useful when the exact measurement start is uncertain.
-- **`"fixed"`**: fits a single window of `duration_minutes` starting at `start_offset_s` seconds after the reference time. More reproducible — all gases are evaluated over the same interval. The first 30 s of chamber deployment — the "dead-bar period" — are mechanically disturbed; skipping them with `start_offset_s = 30` is recommended.
+- **`"sliding"`**: moves a fixed-length sub-window (default `num_rows = 300` rows ≈ 5 min) across the full measurement period and keeps the position with the highest R². Useful when the exact measurement start is uncertain.
+- **`"fixed"`** (default): fits a single window of `duration_minutes` starting at `start_offset_s` seconds after the reference time. More reproducible — all gases are evaluated over the same interval. The first 30 s of chamber deployment — the "dead-bar period" — are mechanically disturbed; skipping them with `start_offset_s = 30` is recommended.
 
 ```{r}
-# Sliding window (default): best 5-min sub-window within 7-min period
+# Sliding window: best 5-min sub-window within 7-min period
 calculate_regression(ch4, ref, ghg = "CH4", reference_time = "date_time",
-                     site = "site", analyzer_code = "1337",
+                     site = "site", analyzer_code = "1337", window_type = "sliding",
                      duration_minutes = 7, num_rows = 300)
 
 # Fixed window: regress from t+30 s to t+7 min (skips dead-bar period)
@@ -226,7 +226,14 @@ res[, c("slope", "slope_regression", "slope_diffusion", "slope_ebullition", "flu
         "flux_diffusion", "flux_ebullition", "ch4_flag")]
 ```
 
-`ch4_flag` labels closures to look at by eye (for example `"ebullition < diffusion + SE"`, or `"diffusion after first bubble"` when the diffusion segment starts after a bubble); the labels never change the values. For closures with a bubble, `flag` is `"ok"`: the R² and correlation tests are for a straight line, not for the two-point total.
+`ch4_flag` labels closures to look at by eye (for example `"ebullition < diffusion + SE"`, or `"diffusion after first bubble"` when the diffusion segment starts after a bubble); the labels never change the values. For closures with a bubble, `slope` is the total, while `r_square`, `correlation` and `flag` describe the linear diffusion fit (the R² and correlation tests are for a straight line, not for the two-point total). `review_needed` is `TRUE` for every closure whose `ch4_flag` is not `"ok"` or a `"no bubble"` label. Bubble detection needs `window_type = "fixed"` (the default).
+
+After looking at the closures with `review_needed = TRUE`, record one decision per closure (`accept`, `total` for total only, `not_bubble` to use the regression fit, `discard`) and apply them with `apply_ch4_review()`; closures still needing review are marked `"unreviewed"`:
+
+```{r}
+dec <- data.frame(site = "P1", reference_time = format(t0, "%Y-%m-%d %H:%M:%S"), decision = "accept")
+apply_ch4_review(reg, dec)[, c("slope", "slope_diffusion", "ch4_flag", "ch4_decision")]
+```
 
 Three settings from FluxSeparator (Sø et al. 2024, *Journal of Geophysical Research: Biogeosciences* 129, e2024JG008035) are off by default: `min_rise` (a bubble must raise CH4 by more than this, in the unit of the concentration column; FluxSeparator uses 1 ppm), `bubble_pad` (readings added around each bubble before the diffusion search; FluxSeparator uses 30) and `min_diffusion_s` (shortest diffusion segment, default 20 s). Both bubble settings act after the early-bubble rule.
 

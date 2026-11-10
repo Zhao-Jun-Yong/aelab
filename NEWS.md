@@ -8,10 +8,23 @@
   archive Minaudo 2026, Zenodo, doi:10.5281/zenodo.18710431): running-variance bubble detection,
   total only when a bubble starts in the first 20 s, two-point total from the smoothed full window,
   linear diffusion on the first linear segment of unflagged readings. The split runs on each
-  closure's final window. For closures with a bubble, `slope` is the total slope and `flag` is
-  `"ok"`; the regression slope is kept in `slope_regression`. New columns `slope_regression`,
-  `slope_total`, `slope_diffusion`, `slope_ebullition`, `n_bubbles` and `ch4_flag`.
-* `calculate_ghg_flux()` adds `flux_diffusion` and `flux_ebullition` when `slope_diffusion` and
+  closure's final window. For closures with a bubble, `slope` is the total slope, while `r_square`,
+  `correlation` and `flag` are for the linear diffusion fit (`NA` when there is none, e.g. an
+  early bubble); the regression slope is kept in `slope_regression`. New columns `slope_regression`,
+  `slope_total`, `slope_diffusion`, `slope_ebullition`, `n_bubbles`, `ch4_flag` and `review_needed`
+  (`TRUE` unless `ch4_flag` is `"ok"` or a `"no bubble"` label). The diffusion segment may have a
+  negative slope (CH4 uptake) when it starts before the first bubble; the code archive keeps
+  positive slopes only. Also `slope_diffusion_se`, `diffusion_start` and `diffusion_end`. For
+  bubble closures `g_factor` is `NA`. `bubble_detection = TRUE` needs `window_type = "fixed"`.
+* New `apply_ch4_review(regression_result, decisions)` applies review decisions (`accept`,
+  `total`, `not_bubble`, `discard`) per closure, matched by `site` and `reference_time`, and adds
+  `ch4_decision` (`"unreviewed"` for `review_needed` closures without a decision). For it, the
+  regression's own `r_square`, `correlation`, `flag` and `g_factor` are kept in `*_regression`
+  columns.
+* `plot_ghg_flux()` draws the diffusion fit, and shows the diffusion slope and `ch4_flag`, for
+  bubble closures.
+* `ch4_options` are checked for type and range (also when `bubble_detection = FALSE`).
+* `calculate_ghg_flux()` adds `flux_diffusion` and `flux_ebullition` (and `flux_diffusion_se`) when `slope_diffusion` and
   `slope_ebullition` are present; `flux` is then the total CH4 flux.
 * `ch4_options` sets the detection window, its alignment, percentile, merge gap, minimum
   segment length, the 20 s early-bubble rule and its origin, the total-flux start, the smoothing
@@ -25,6 +38,12 @@
   (Minaudo et al. 2026, Guideline 4; Sø et al. 2024, p. 6).
 
 ## Flux QC changes (`calculate_regression()`) — slopes and flags change on re-run
+
+* Default `window_type` is now `"fixed"` (was `"sliding"`) and default `r2_threshold` is 0.7 (was
+  0.8). Pass `window_type = "sliding"` and `r2_threshold = 0.8` to keep earlier results.
+* A window whose readings are all equal is flagged `"zero"` (no trend), not `"no_data"`.
+* A warning is given when a window has duplicated timestamps (usually `data` holding more than
+  one analyzer).
 
 * `fit_type = "auto"` accepts a quadratic or exponential fit only when its AICc is lower than the
   current model's (Kutzbach et al. 2007; Leiber-Sauheitl et al. 2014; goFlux), replacing the

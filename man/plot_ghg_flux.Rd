@@ -36,7 +36,9 @@ A \code{ggplot} object with one facet per site. Each panel shows raw concentrati
 \description{
 Plot GHG concentration over time for each measurement window, overlaid with the
   fitted regression line and colored by quality flag. Use this for visual QC of
-  \code{\link{calculate_regression}} output.
+  \code{\link{calculate_regression}} output. For CH4 closures split with
+  \code{bubble_detection = TRUE}, the line is the linear diffusion fit over its segment and the
+  panel title adds the diffusion slope and \code{ch4_flag}.
 }
 \examples{
 data(n2o)

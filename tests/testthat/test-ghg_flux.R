@@ -184,7 +184,7 @@ test_that("calculate_regression returns no_data when window has insufficient row
   )
   result <- calculate_regression(data, ref, "CH4",
                                  reference_time = "date_time",
-                                 site = "site", analyzer_code = "TEST")
+                                 site = "site", analyzer_code = "TEST", window_type = "sliding")
   expect_equal(result$flag, "no_data")
 })
 
@@ -269,6 +269,7 @@ test_that("calculate_regression bubble_detection = TRUE splits synthetic CH4 tra
   expect_equal(step$ch4_flag, "ok")
   expect_equal(step$slope, step$slope_total)
   expect_equal(step$flag, "ok")
+  expect_gt(step$r_square, 0.9)  # the diffusion fit, not the regression across the step
   expect_false(isTRUE(all.equal(step$slope, step$slope_regression)))
   expect_equal(step$slope_diffusion, 1e-4, tolerance = 0.1)
   expect_equal(step$slope_total, 1e-4 + 0.05 / 299, tolerance = 0.05)
@@ -278,6 +279,8 @@ test_that("calculate_regression bubble_detection = TRUE splits synthetic CH4 tra
 
   early <- ch4_split(trace(10))
   expect_equal(early$ch4_flag, "early bubble: total only")
+  expect_true(is.na(early$flag) && is.na(early$r_square) && is.na(early$correlation))
+  expect_false(is.na(early$flag_regression))
   expect_equal(early$slope, early$slope_total)
   expect_true(is.na(early$slope_diffusion) && is.na(early$slope_ebullition))
 
@@ -345,9 +348,86 @@ test_that("ch4_options min_rise, bubble_pad and min_diffusion_s", {
   expect_match(long$ch4_flag, "diffusion after first bubble")
   expect_equal(long$slope_diffusion, 1e-4, tolerance = 0.1)
 
+  expect_true(long$review_needed)
+  expect_false(short$review_needed)
+
+  # CH4 uptake before a bubble: negative diffusion kept (trim_to_min would trim the falling start)
+  set.seed(2)
+  up <- 2.5 - 2e-4 * (0:299) + rnorm(300, 0, 1e-4) + 0.3 * (0:299 >= 150)
+  upt <- ch4_split(up, trim_to_min = FALSE)
+  expect_equal(upt$ch4_flag, "ok")
+  expect_equal(upt$slope_diffusion, -2e-4, tolerance = 0.05)
+  expect_equal(upt$slope_ebullition, upt$slope_total - upt$slope_diffusion)
+
   expect_error(ch4_split(trace(100), bubble_pad = 1.5), "bubble_pad")
   expect_error(ch4_split(trace(100), min_rise = -1), "min_rise")
   expect_error(ch4_split(trace(100), min_diffusion_s = 0), "min_diffusion_s")
+})
+
+test_that("bubble_detection guards, new columns, plot and option checks", {
+  set.seed(1)
+  trace <- 2 + 1e-4 * (0:299) + rnorm(300, 0, 2e-4) + 0.05 * (0:299 >= 100)
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  d <- data.frame(real_datetime = t0 + 0:299, CH4 = trace)
+  ref <- data.frame(date_time = t0, site = "x", analyzer = "a")
+  expect_error(calculate_regression(d, ref, "CH4", "date_time", "site", "a", window_type = "sliding",
+                                    bubble_detection = TRUE), "fixed")
+
+  r <- ch4_split(trace)
+  expect_equal(r$diffusion_start, "2024/01/01 08:00:01")  # trim_to_min drops the first reading
+  expect_true(r$diffusion_end < "2024/01/01 08:01:40")
+  expect_gt(r$slope_diffusion_se, 0)
+  expect_true(is.na(r$g_factor))
+  f <- calculate_ghg_flux(cbind(r, area = 1, volume = 1, temp = 25))
+  expect_equal(f$flux_diffusion_se / f$flux_diffusion, r$slope_diffusion_se / r$slope_diffusion)
+  expect_s3_class(plot_ghg_flux(d, r, "CH4"), "ggplot")
+
+  # a 2-reading run spanning >= 20 s is skipped, not an error
+  expect_false(.first_linear_ch4(c(0, 25), c(2, 2.1), c(FALSE, FALSE))$ok)
+
+  # constant readings: no trend, flagged zero
+  flat <- calculate_regression(transform(d, CH4 = 2), ref, "CH4", "date_time", "site", "a")
+  expect_equal(flat$flag, "zero")
+
+  # options checked even without bubble detection
+  expect_error(calculate_regression(d, ref, "CH4", "date_time", "site", "a",
+                                    ch4_options = list(trim_to_min = "yes")), "trim_to_min")
+  expect_error(ch4_split(trace, min_len = 0), "min_len")
+  expect_error(ch4_split(trace, bubble_prob = 2), "bubble_prob")
+  expect_error(calculate_regression(d, ref, "CH4", "date_time", "site", "a", ch4_options = list(1)),
+               "name")
+  expect_warning(calculate_regression(rbind(d, d), ref, "CH4", "date_time", "site", "a"),
+                 "Duplicated timestamps")
+})
+
+test_that("apply_ch4_review applies decisions", {
+  set.seed(1)
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  step <- 2 + 1e-4 * (0:299) + rnorm(300, 0, 2e-4) + 0.05 * (0:299 >= 100)
+  d <- data.frame(real_datetime = rep(t0 + 0:299, 2) + rep(c(0, 3600), each = 300), CH4 = c(step, step))
+  ref <- data.frame(date_time = t0 + c(0, 3600), site = c("x", "y"), analyzer = "a")
+  reg <- calculate_regression(d, ref, "CH4", "date_time", "site", "a", duration_minutes = 299 / 60,
+                              bubble_detection = TRUE)
+  plain <- calculate_regression(d, ref, "CH4", "date_time", "site", "a", duration_minutes = 299 / 60)
+  expect_equal(reg$flag_regression, plain$flag)
+  expect_equal(reg$r_square_regression, plain$r_square)
+
+  dec <- data.frame(site = c("x", "y"), reference_time = c("2024-01-01 08:00:00", "2024-01-01 09:00:00"),
+                    decision = c("not_bubble", "total"))
+  out <- apply_ch4_review(reg, dec)
+  expect_equal(out$slope[1], plain$slope[1])
+  expect_equal(out$flag[1], plain$flag[1])
+  expect_equal(out$slope_ebullition[1], 0)
+  expect_equal(out$slope[2], reg$slope_total[2])
+  expect_true(is.na(out$slope_diffusion[2]))
+  expect_equal(out$ch4_decision, c("not_bubble", "total"))
+
+  expect_equal(apply_ch4_review(reg, dec[0, ])$ch4_decision, ifelse(reg$review_needed, "unreviewed", "auto"))
+  expect_equal(apply_ch4_review(reg, transform(dec, decision = "discard"))$flag, c("discard", "discard"))
+  expect_error(apply_ch4_review(reg, transform(dec, decision = "maybe")), "Unknown decision")
+  expect_error(apply_ch4_review(reg, rbind(dec, dec)), "More than one")
+  expect_warning(apply_ch4_review(reg, transform(dec, site = "z")), "match no closure")
+  expect_error(apply_ch4_review(plain, dec), "bubble_detection")
 })
 
 test_that("convert_ghg_unit converts correctly", {
