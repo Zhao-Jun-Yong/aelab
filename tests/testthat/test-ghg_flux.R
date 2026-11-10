@@ -244,17 +244,17 @@ test_that("calculate_ghg_flux uses 3600 s h-1 giving mmol m-2 h-1", {
   expect_equal(result$unit, "mmol m-2 h-1")
 })
 
-# CH4 split in calculate_regression(ch4 = "separate"): fixed 299 s window from t0 + off
+# CH4 split in calculate_regression(bubble_detection = TRUE): fixed 299 s window from t0 + off
 ch4_split <- function(ch4, off = 0, ...) {
   t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
   d <- data.frame(real_datetime = t0 + seq_along(ch4) - 1, CH4 = ch4)
   ref <- data.frame(date_time = t0 - off, site = "x", analyzer = "a")
   calculate_regression(d, ref, "CH4", reference_time = "date_time", site = "site", analyzer_code = "a",
                        window_type = "fixed", start_offset_s = off, duration_minutes = 299 / 60,
-                       ch4 = "separate", ch4_options = list(...))
+                       bubble_detection = TRUE, ch4_options = list(...))
 }
 
-test_that("calculate_regression ch4 = 'separate' splits synthetic CH4 traces", {
+test_that("calculate_regression bubble_detection = TRUE splits synthetic CH4 traces", {
   sec <- 0:299
   trace <- function(step_at) 2 + 1e-4 * sec + ifelse(!is.na(step_at) & sec >= step_at, 0.05, 0) + rnorm(300, 0, 3e-4)
   set.seed(1); ramp <- ch4_split(trace(NA))

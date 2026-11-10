@@ -631,8 +631,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   \code{"discard"}. Default \code{NULL} (disabled). goFlux uses 2 as its default
 #'   (\code{g.limit}; Rheault et al. 2024), but there it is two-sided (|g| > 2 or < 0.5) and switches to
 #'   the linear flux rather than discarding; no published study justifies a value.
-#' @param ch4 \code{"regression"} (default) returns the regression slope only. \code{"separate"}
-#'   splits each CH4 closure into total, diffusive and ebullitive slopes following the automated
+#' @param bubble_detection \code{FALSE} (default) returns the regression slope only. \code{TRUE}
+#'   (for CH4) splits each closure into total, diffusive and ebullitive slopes following the automated
 #'   method of Minaudo et al. (2026, pp. 3-4, \doi{10.1002/lom3.70054}; code archive Minaudo 2026,
 #'   \doi{10.5281/zenodo.18710431}). The split uses the readings of the closure's final window,
 #'   after \code{window_type} has chosen it. Per closure:
@@ -641,7 +641,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'       window of readings, and readings whose variance is above a percentile of all variances
 #'       (minimum 1e-4) are flagged; flagged segments close together are merged and short ones
 #'       dropped (Minaudo et al. 2026, p. 4).
-#'     \item No bubble: \code{slope} is the regression slope as with \code{"regression"};
+#'     \item No bubble: \code{slope} is the regression slope, as with \code{bubble_detection = FALSE};
 #'       total = diffusion = that slope, ebullition = 0.
 #'     \item A bubble starting within \code{early_s} seconds: total only (paper p. 4).
 #'     \item Otherwise: the total is the two-point change of the smoothed series (minimum of the
@@ -653,7 +653,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'       block; with one block the best adjusted R\eqn{^2} is taken, with several the last end of
 #'       the first block (as the code archive); ebullition = total - diffusion.
 #'   }
-#' @param ch4_options Only for \code{ch4 = "separate"}: a named list overriding any of the
+#' @param ch4_options Only for \code{bubble_detection = TRUE}: a named list overriding any of the
 #'   settings below. Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
 #'   marked \emph{pending} are where the paper and its code archive differ or the paper is
 #'   silent; they were asked of the author (2026-11-10) and the defaults may change.
@@ -721,7 +721,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   for the selected window), and \code{n_candidates} (number of deadband/cutoff candidates that
 #'   produced a usable fit; \code{0} when the measurement was flagged \code{"discard"} because no
 #'   candidate survived).
-#'   With \code{ch4 = "separate"} also \code{slope_regression} (the regression slope),
+#'   With \code{bubble_detection = TRUE} also \code{slope_regression} (the regression slope),
 #'   \code{slope_total}, \code{slope_diffusion}, \code{slope_ebullition} (unit of \code{ghg} per
 #'   second), \code{n_bubbles} and \code{ch4_flag}. For closures with a bubble, \code{slope} is
 #'   \code{slope_total}, \code{flag} is \code{"ok"} (the R\eqn{^2} and correlation tests are for a
@@ -800,12 +800,12 @@ calculate_regression <- function(data, reference_df, ghg,
                                  g_factor_threshold = NULL,
                                  min_deadband = 30, max_deadband = 60, deadband_step = 10,
                                  min_window_size = 60, cutoff_step = 10, n_boot = 200,
-                                 ch4 = c("regression", "separate"), ch4_options = list()) {
+                                 bubble_detection = FALSE, ch4_options = list()) {
 
   fit_type    <- match.arg(fit_type,    c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
   window_type <- match.arg(window_type, c("sliding", "fixed", "pareto"))
-  ch4         <- match.arg(ch4)
-  if (ch4 == "separate") ch4_opt <- .ch4_options(ch4_options)
+  if (!isTRUE(bubble_detection) && !isFALSE(bubble_detection)) stop("bubble_detection must be TRUE or FALSE.")
+  if (bubble_detection) ch4_opt <- .ch4_options(ch4_options)
 
   # For fit_type = "auto" (kappamax) or window_type = "pareto" (fit_score sigma + bootstrap),
   # resolve instrument_precision from the built-in table if not supplied. Try to match by model
@@ -992,7 +992,7 @@ calculate_regression <- function(data, reference_df, ghg,
 
     # CH4 split on the final window (Minaudo et al. 2026, pp. 3-4)
     split <- NULL
-    if (ch4 == "separate") {
+    if (bubble_detection) {
       win <- if (is.na(best_start_dt)) sorted_data[0, ] else
         sorted_data[sorted_data$real_datetime >= best_start_dt & sorted_data$real_datetime <= best_end_dt, ]
       split <- .separate_ch4(as.numeric(win$real_datetime), as.numeric(win[[ghg]]), ch4_opt,
@@ -1337,7 +1337,7 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #' @param temp Name of the column in `data` that contains values of the temperature of the gas (in Celsius).
 #' @return \code{data} with \code{flux} and \code{unit} added. When \code{data} has
 #'   \code{slope_diffusion} and \code{slope_ebullition} (from
-#'   \code{calculate_regression(ch4 = "separate")}), \code{flux_diffusion} and
+#'   \code{calculate_regression(bubble_detection = TRUE)}), \code{flux_diffusion} and
 #'   \code{flux_ebullition} are added too; \code{flux} is then the total CH4 flux, because
 #'   \code{slope} holds the total slope for closures with a bubble.
 #' @examples
@@ -1373,7 +1373,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
     (gas_constant * (temp + celsius_to_kelvin) * area)
 
   data$flux <- to_flux(data[[slope]])
-  # CH4 split from calculate_regression(ch4 = "separate")
+  # CH4 split from calculate_regression(bubble_detection = TRUE)
   for (part in c("diffusion", "ebullition")) {
     if (paste0("slope_", part) %in% names(data)) data[[paste0("flux_", part)]] <- to_flux(data[[paste0("slope_", part)]])
   }
@@ -1384,7 +1384,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   return(data)
 }
 
-# ch4_options with their defaults (see calculate_regression(ch4 = "separate")), checked
+# ch4_options with their defaults (see calculate_regression(bubble_detection = TRUE)), checked
 .ch4_options <- function(ch4_options) {
   opt <- list(bubble_window = 10, bubble_align = "centre", bubble_prob = 0.75, merge_gap = 10,
               min_len = 5, early_s = 20, early_from = "window", total_from = "window",

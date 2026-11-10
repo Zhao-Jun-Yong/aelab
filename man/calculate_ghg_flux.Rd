@@ -26,7 +26,7 @@ calculate_ghg_flux(
 \value{
 \code{data} with \code{flux} and \code{unit} added. When \code{data} has
   \code{slope_diffusion} and \code{slope_ebullition} (from
-  \code{calculate_regression(ch4 = "separate")}), \code{flux_diffusion} and
+  \code{calculate_regression(bubble_detection = TRUE)}), \code{flux_diffusion} and
   \code{flux_ebullition} are added too; \code{flux} is then the total CH4 flux, because
   \code{slope} holds the total slope for closures with a bubble.
 }

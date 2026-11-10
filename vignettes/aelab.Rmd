@@ -208,7 +208,7 @@ calculate_ghg_flux(flux_ch4)
 
 ### Separating CH4 diffusion and ebullition
 
-With `ch4 = "separate"`, `calculate_regression()` splits each CH4 closure into total, diffusive and ebullitive slopes following the automated method of Minaudo et al. (2026, *Limnology and Oceanography: Methods* 24, e70054, pp. 3-4), with its code archive (Minaudo 2026, Zenodo, doi:10.5281/zenodo.18710431). The split runs on the readings of each closure's final window. For a closure with a bubble, `slope` becomes the total slope (the regression slope is kept in `slope_regression`); without a bubble, `slope` stays the regression slope. `calculate_ghg_flux()` then turns `slope`, `slope_diffusion` and `slope_ebullition` into `flux`, `flux_diffusion` and `flux_ebullition`. Settings that are still being checked with the author are in `ch4_options`; see `?calculate_regression`.
+With `bubble_detection = TRUE`, `calculate_regression()` splits each CH4 closure into total, diffusive and ebullitive slopes following the automated method of Minaudo et al. (2026, *Limnology and Oceanography: Methods* 24, e70054, pp. 3-4), with its code archive (Minaudo 2026, Zenodo, doi:10.5281/zenodo.18710431). The split runs on the readings of each closure's final window. For a closure with a bubble, `slope` becomes the total slope (the regression slope is kept in `slope_regression`); without a bubble, `slope` stays the regression slope. `calculate_ghg_flux()` then turns `slope`, `slope_diffusion` and `slope_ebullition` into `flux`, `flux_diffusion` and `flux_ebullition`. Settings that are still being checked with the author are in `ch4_options`; see `?calculate_regression`.
 
 ```{r}
 t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
@@ -220,7 +220,7 @@ readings <- data.frame(real_datetime = t0 + sec,
 ref <- data.frame(date_time = t0, site = "P1", analyzer = "LI-7810")
 reg <- calculate_regression(readings, ref, "CH4", reference_time = "date_time", site = "site",
                             analyzer_code = "LI-7810", window_type = "fixed",
-                            duration_minutes = 299 / 60, ch4 = "separate")
+                            duration_minutes = 299 / 60, bubble_detection = TRUE)
 res <- calculate_ghg_flux(cbind(reg, area = 1, volume = 1, temp = 25))
 res[, c("slope", "slope_regression", "slope_diffusion", "slope_ebullition", "flux",
         "flux_diffusion", "flux_ebullition", "ch4_flag")]
@@ -233,7 +233,7 @@ Three settings from FluxSeparator (Sø et al. 2024, *Journal of Geophysical Rese
 ```{r}
 reg2 <- calculate_regression(readings, ref, "CH4", reference_time = "date_time", site = "site",
                              analyzer_code = "LI-7810", window_type = "fixed",
-                             duration_minutes = 299 / 60, ch4 = "separate",
+                             duration_minutes = 299 / 60, bubble_detection = TRUE,
                              ch4_options = list(min_rise = 0.1))  # the 50 ppb step is now no bubble
 reg2[, c("slope", "slope_diffusion", "slope_ebullition", "ch4_flag")]
 ```

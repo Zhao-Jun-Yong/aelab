@@ -2,7 +2,7 @@
 
 ## CH4 bubble flux (`calculate_regression()`)
 
-* New `ch4 = "separate"` in `calculate_regression()` (default `"regression"`, unchanged) splits each
+* New `bubble_detection` in `calculate_regression()` (default `FALSE`, unchanged); `TRUE` splits each
   CH4 closure into total, diffusive and ebullitive slopes with the automated method of Minaudo et al.
   (2026, *Limnology and Oceanography: Methods* 24, e70054, pp. 3-4, doi:10.1002/lom3.70054; code
   archive Minaudo 2026, Zenodo, doi:10.5281/zenodo.18710431): running-variance bubble detection,

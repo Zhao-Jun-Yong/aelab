@@ -28,7 +28,7 @@ calculate_regression(
   min_window_size = 60,
   cutoff_step = 10,
   n_boot = 200,
-  ch4 = c("regression", "separate"),
+  bubble_detection = FALSE,
   ch4_options = list()
 )
 }
@@ -139,8 +139,8 @@ of fitted parameters for the model actually used), adds them to the candidate's 
 values to build a synthetic concentration series, and refits the same model family via
 \code{\link{calculate_regression}}'s internal fitting routine - no MCMC and no new dependency.}
 
-\item{ch4}{\code{"regression"} (default) returns the regression slope only. \code{"separate"}
-splits each CH4 closure into total, diffusive and ebullitive slopes following the automated
+\item{bubble_detection}{\code{FALSE} (default) returns the regression slope only. \code{TRUE}
+(for CH4) splits each closure into total, diffusive and ebullitive slopes following the automated
 method of Minaudo et al. (2026, pp. 3-4, \doi{10.1002/lom3.70054}; code archive Minaudo 2026,
 \doi{10.5281/zenodo.18710431}). The split uses the readings of the closure's final window,
 after \code{window_type} has chosen it. Per closure:
@@ -149,7 +149,7 @@ after \code{window_type} has chosen it. Per closure:
     window of readings, and readings whose variance is above a percentile of all variances
     (minimum 1e-4) are flagged; flagged segments close together are merged and short ones
     dropped (Minaudo et al. 2026, p. 4).
-  \item No bubble: \code{slope} is the regression slope as with \code{"regression"};
+  \item No bubble: \code{slope} is the regression slope, as with \code{bubble_detection = FALSE};
     total = diffusion = that slope, ebullition = 0.
   \item A bubble starting within \code{early_s} seconds: total only (paper p. 4).
   \item Otherwise: the total is the two-point change of the smoothed series (minimum of the
@@ -162,7 +162,7 @@ after \code{window_type} has chosen it. Per closure:
     the first block (as the code archive); ebullition = total - diffusion.
 }}
 
-\item{ch4_options}{Only for \code{ch4 = "separate"}: a named list overriding any of the
+\item{ch4_options}{Only for \code{bubble_detection = TRUE}: a named list overriding any of the
 settings below. Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
 marked \emph{pending} are where the paper and its code archive differ or the paper is
 silent; they were asked of the author (2026-11-10) and the defaults may change.
@@ -232,7 +232,7 @@ A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\e
   for the selected window), and \code{n_candidates} (number of deadband/cutoff candidates that
   produced a usable fit; \code{0} when the measurement was flagged \code{"discard"} because no
   candidate survived).
-  With \code{ch4 = "separate"} also \code{slope_regression} (the regression slope),
+  With \code{bubble_detection = TRUE} also \code{slope_regression} (the regression slope),
   \code{slope_total}, \code{slope_diffusion}, \code{slope_ebullition} (unit of \code{ghg} per
   second), \code{n_bubbles} and \code{ch4_flag}. For closures with a bubble, \code{slope} is
   \code{slope_total}, \code{flag} is \code{"ok"} (the R\eqn{^2} and correlation tests are for a
