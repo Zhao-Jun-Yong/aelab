@@ -223,7 +223,15 @@ res[, c("slope_total", "slope_diffusion", "slope_ebullition", "flux", "flux_diff
         "flux_ebullition", "ch4_flag")]
 ```
 
-`ch4_flag` labels closures to look at by eye (for example `"ebullition < diffusion + SE"`); the labels never change the values.
+`ch4_flag` labels closures to look at by eye (for example `"ebullition < diffusion + SE"`, or `"diffusion after first bubble"` when the diffusion segment starts after a bubble); the labels never change the values.
+
+Three settings from FluxSeparator (Sø et al. 2024, *Journal of Geophysical Research: Biogeosciences* 129, e2024JG008035) are off by default: `min_rise` (a bubble must raise CH4 by more than this, in the unit of `conc_data`; FluxSeparator uses 1 ppm), `bubble_pad` (readings added around each bubble before the diffusion search; FluxSeparator uses 30) and `min_diffusion_s` (shortest diffusion segment, default 20 s). Both bubble settings act after the early-bubble rule.
+
+```{r}
+res2 <- calculate_ghg_flux(window, ch4 = "separate", conc_data = readings,
+                           ch4_options = list(min_rise = 0.1))  # the 50 ppb step is now no bubble
+res2[, c("slope_total", "slope_diffusion", "slope_ebullition", "ch4_flag")]
+```
 
 ## Additional GHG tools
 
