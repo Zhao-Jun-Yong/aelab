@@ -153,6 +153,63 @@ test_that("calculate_regression exp_tz fits exponential signal and returns posit
   expect_gt(result$slope, 0)
 })
 
+test_that("exponential fits recover the initial slope A*b of noisy saturating curves", {
+  # C = 400 + A(1 - exp(-b t)), 1 Hz, 300 s, noise sd 0.5: true slope at t = 0 is A * b.
+  # The old fixed nls start (b = 0.001) returned 0.08 for a true slope of 1.
+  tt <- 0:299
+  set.seed(1)
+  for (b in c(0.005, 0.01, 0.02)) {
+    y <- 400 + 100 * (1 - exp(-b * tt)) + stats::rnorm(300, 0, 0.5)
+    for (ft in c("exp_tz", "exp_zhao18")) {
+      f <- expect_silent(.fit_ghg_model(y, tt, ft, t_zero = 0))
+      expect_equal(f$slope, 100 * b, tolerance = 0.05, info = paste(ft, b))
+    }
+  }
+  set.seed(2)
+  y <- 400 + 100 * (1 - exp(-0.01 * tt)) + stats::rnorm(300, 0, 0.5)
+  a <- .fit_ghg_model(y, tt, "auto", t_zero = 0, instrument_precision = 0.5)
+  expect_identical(a$fit_used, "exp_tz")
+  expect_equal(a$slope, 1, tolerance = 0.05)
+})
+
+test_that("explicit exponential fits return NA without curvature; auto falls back", {
+  tt <- 0:299
+  # exact line: the residual sum of squares does not depend on b
+  for (ft in c("exp_tz", "exp_zhao18")) {
+    f <- expect_silent(.fit_ghg_model(400 + 0.05 * tt, tt, ft, t_zero = 0))
+    expect_true(is.na(f$slope))
+    expect_true(is.na(f$r_square))
+  }
+  # noisy line: an explicit exp fit may still return a slope; auto keeps the simpler model
+  set.seed(3)
+  y <- 400 + 0.05 * tt + stats::rnorm(300, 0, 0.5)
+  a <- .fit_ghg_model(y, tt, "auto", t_zero = 0, instrument_precision = 0.5)
+  expect_false(a$fit_used %in% c("exp_tz", "exp_zhao18"))
+  expect_equal(a$slope, 0.05, tolerance = 0.05)
+})
+
+test_that("exp_tz fits C0, so a disturbed first reading does not move the slope", {
+  tt <- 0:299
+  set.seed(5)
+  y <- 400 + 100 * (1 - exp(-0.01 * tt)) + stats::rnorm(300, 0, 3)
+  y_spike <- replace(y, 1, y[1] + 15)
+  s  <- .fit_ghg_model(y, tt, "exp_tz", t_zero = 0)$slope
+  s2 <- .fit_ghg_model(y_spike, tt, "exp_tz", t_zero = 0)$slope
+  # with C0 = first reading the spike gave about -40 % (simulation, 200 runs)
+  expect_equal(s, 1, tolerance = 0.05)
+  expect_equal(s2, 1, tolerance = 0.05)
+})
+
+test_that("auto does not pick exp_tz for an accelerating curve", {
+  # A convex exponential (Cm - C0 opposite to the slope) can fit an accelerating rise and read low
+  tt <- 0:299
+  set.seed(4)
+  y <- 400 + 0.05 * tt + 2e-4 * tt^2 + stats::rnorm(300, 0, 0.5)
+  expect_lt(.fit_ghg_model(y, tt, "exp_tz", t_zero = 0)$amp, 0)
+  a <- .fit_ghg_model(y, tt, "auto", t_zero = 0, instrument_precision = 0.5)
+  expect_identical(a$fit_used, "linear")
+})
+
 test_that("calculate_regression exp_zhao18 fits exponential signal and returns positive slope", {
   elapsed <- seq(0, 419)
   data <- data.frame(

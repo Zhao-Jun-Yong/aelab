@@ -41,6 +41,20 @@
 
 * Default `window_type` is now `"fixed"` (was `"sliding"`) and default `r2_threshold` is 0.7 (was
   0.8). Pass `window_type = "sliding"` and `r2_threshold = 0.8` to keep earlier results.
+* `exp_tz` and `exp_zhao18` fits (also inside `"auto"` and `plot_ghg_flux()`) no longer start
+  `nls()` at `b = 0.001` and return unconverged coefficients. For a given curvature `b` the model
+  is linear in `Cm` and `a`, so `b` is now found by a one-dimensional search and `Cm`, `a` by least
+  squares. On noisy saturating test curves the slope was off by up to 20 times (e.g. 0.08 for a true
+  1.0) and is now within 5 %. When the best `b` is at the edge of its search range (no usable
+  curvature), an explicit `exp_*` fit gives `NA` slope and flag `"no_data"`, and `"auto"` keeps the
+  linear or quadratic fit. A noisy straight line can still return an exponential slope. Model and slope formula are those of fluxible (Gaudard et al. 2025).
+* `exp_tz` now fits the initial concentration `C0` with the other parameters (as in Kutzbach et
+  al. 2007, p. 1010) instead of taking the first reading. In simulations with noise sd 3 this cut
+  the spread of the slope from 8-18 % to 3-5 % of its true value. fluxible fixes `C0` at the
+  intercept of a 15 s linear fit (Gaudard et al. 2025, SI pp. 29-30). `exp_zhao18` keeps the
+  first reading, because its fitted `t0` overlaps with `C0`.
+* `fit_type = "auto"` accepts `exp_tz` only when the curve levels off (`Cm - C0` has the sign of
+  the linear slope), the rule it already applied to the quadratic (Levy et al. 2011, p. 817).
 * A window whose readings are all equal is flagged `"zero"` (no trend), not `"no_data"`.
 * A warning is given when a window has duplicated timestamps (usually `data` holding more than
   one analyzer).

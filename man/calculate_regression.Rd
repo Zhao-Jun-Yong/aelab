@@ -60,9 +60,17 @@ specific measurement. This allows different window lengths for individual chambe
 \code{"auto"} (automatic model selection: tries linear -> quadratic -> exp_tz in order,
 accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a
 quadratic only when it levels off rather than accelerates (Levy et al. 2011), and exp_tz only
-when its curvature parameter does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
+when it levels off and its curvature parameter does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
 \code{instrument_precision = NULL}, precision is looked up from \code{\link{analyzer_precision}}
-by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.}
+by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.
+The exponential models and their slope formulas follow fluxible (Gaudard et al. 2025); the curvature
+\code{b} is found by a one-dimensional search, with \code{Cm} and \code{a} solved by least squares for
+each \code{b}. \code{"exp_tz"} fits the initial concentration \code{C0} as well (Kutzbach et al.
+2007); \code{"exp_zhao18"} takes \code{C0} as the first reading. When the best \code{b} lies at the edge of its search range, or the fit does not
+depend on \code{b} (an exact line), the window has no usable curvature: an explicit exponential
+\code{fit_type} gives an \code{NA} slope and flag \code{"no_data"}, and \code{"auto"} keeps the linear or
+quadratic fit. A noisy straight line can still return an exponential slope; use \code{"auto"} when
+curvature is uncertain.}
 
 \item{t_zero}{Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.}
 
@@ -313,6 +321,18 @@ estimates. \emph{PLOS ONE}, 13(7), e0200876. \doi{10.1371/journal.pone.0200876}
 Gaudard, J., et al. (2025). fluxible: An R package to process ecosystem gas fluxes from
 closed-loop chambers in an automated and reproducible way. \emph{Methods in Ecology and
 Evolution}. \doi{10.1111/2041-210X.70161}
+
+Zhao, P., Hammerle, A., Zeeman, M., & Wohlfahrt, G. (2018). On the calculation of daytime CO2
+fluxes measured by automated closed transparent chambers. \emph{Agricultural and Forest
+Meteorology}, 263, 267-275. \doi{10.1016/j.agrformet.2018.08.022}
+
+Kutzbach, L., et al. (2007). CO2 flux determination by closed-chamber methods can be seriously
+biased by inappropriate application of linear regression. \emph{Biogeosciences}, 4, 1005-1025.
+\doi{10.5194/bg-4-1005-2007}
+
+Levy, P. E., et al. (2011). Quantification of uncertainty in trace gas fluxes measured by the
+static chamber method. \emph{European Journal of Soil Science}, 62, 811-821.
+\doi{10.1111/j.1365-2389.2011.01403.x}
 
 Kobayashi, A. N. A., Roques, C., Hunkeler, D., & Brunner, P. (2026). Uncertainty
 quantification in soil gas fluxes: Reducing the user's arbitrariness. \emph{European Journal

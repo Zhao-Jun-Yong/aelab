@@ -116,6 +116,54 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 
 }
 
+# Exponential fits (model and slope as fluxible's exp_tz / exp_zhao18; Gaudard et al. 2025).
+# For a fixed b the model is linear in Cm, a and C0, so b is found by a 1-D search on the residual
+# sum of squares and the rest by least squares (variable projection; no start values to guess).
+# exp_tz fits C0 from all readings, as least-squares fits of exponential chamber models do
+# (Kutzbach et al. 2007, p. 1010); fluxible instead fixes it at the intercept of a 15 s linear
+# fit (Gaudard et al. 2025, SI pp. 29-30), with no stated reason; a single first reading carries
+# its full noise into the slope. exp_zhao18 keeps C0 = first reading: its fitted t0 overlaps C0.
+# A best b at the edge of the search range [0.05, 50] / window length means the window has no
+# usable curvature (linear, flat or a step): NULL, so the caller reports NA or skips the model.
+.exp_curve_fit <- function(conc, elapsed_s, zhao = FALSE) {
+  C0     <- conc[1]  # exp_zhao18 only
+  ss_tot <- sum((conc - mean(conc))^2)
+  d  <- max(elapsed_s) - min(elapsed_s)
+  if (length(conc) < 5 || d <= 0) return(NULL)
+  lo <- log(0.05 / d); hi <- log(50 / d)
+  .solve <- function(lb, t0) {
+    u <- elapsed_s - t0; e <- exp(-exp(lb) * u)
+    if (!all(is.finite(e))) return(NULL)
+    # exp_tz: conc = Cm + a u + (C0 - Cm) e; exp_zhao18: conc - C0 e = Cm (1 - e) + a u
+    f <- if (zhao) stats::lm.fit(cbind(1 - e, u), conc - C0 * e) else
+      stats::lm.fit(cbind(1, u, e), conc)
+    if (anyNA(f$coefficients)) NULL else f
+  }
+  .rss <- function(p) {
+    f <- .solve(p[1], if (length(p) > 1) p[2] else 0)
+    if (is.null(f)) Inf else sum(f$residuals^2)
+  }
+  grid <- seq(lo, hi, length.out = 40)
+  r    <- vapply(grid, .rss, numeric(1))
+  k    <- which.min(r)
+  if (!length(k) || !is.finite(r[k])) return(NULL)
+  # RSS independent of b (e.g. an exact line): the data hold no curvature information
+  if (max(r[is.finite(r)]) - r[k] <= 1e-8 * ss_tot) return(NULL)
+  lb <- stats::optimize(.rss, grid[c(max(1, k - 1), min(40, k + 1))])$minimum
+  t0 <- 0
+  if (zhao) {
+    o <- stats::optim(c(lb, 0), .rss)
+    if (o$convergence != 0) return(NULL)
+    lb <- o$par[1]; t0 <- o$par[2]
+  }
+  if (lb - lo < 1e-3 || hi - lb < 1e-3) return(NULL)
+  f <- .solve(lb, t0)
+  if (is.null(f)) return(NULL)
+  cf <- f$coefficients
+  list(Cm = cf[[1]], a = cf[[2]], b = exp(lb), t0 = t0,
+       C0 = if (zhao) C0 else cf[[1]] + cf[[3]], residuals = f$residuals)
+}
+
 # Internal helper: fit a GHG concentration curve and return slope, R\u00b2, curvature b, and fit_used.
 # kappamax:            if provided and b > kappamax, exponential fits fall back to linear.
 # instrument_precision: only used when fit_type = "auto" to compute kappamax per window
@@ -139,74 +187,40 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
          kmax_used = NA_real_, curvature = unname(stats::coef(fit)[3]))
   }
 
+  .exp_result <- function(zhao = FALSE) {
+    fit_used <- if (zhao) "exp_zhao18" else "exp_tz"
+    ef <- .exp_curve_fit(conc, elapsed_s, zhao)
+    if (is.null(ef)) return(NULL)
+    # exp_zhao18 reports the slope at its fitted t0, exp_tz at the user's t_zero
+    slope <- if (zhao) ef$a + ef$b * (ef$Cm - ef$C0) else
+      ef$a + ef$b * (ef$Cm - ef$C0) * exp(-ef$b * t_zero)
+    r_sq <- if (ss_tot > 0) 1 - sum(ef$residuals^2) / ss_tot else NA_real_
+    list(slope = slope, r_square = r_sq, b_param = ef$b, fit_used = fit_used,
+         residuals = ef$residuals, kmax_used = NA_real_, amp = ef$Cm - ef$C0)
+  }
+
   .exp_tz_result <- function(kmax) {
-    Cm_start <- conc[length(conc)]
-    fit <- tryCatch(
-      stats::nls(conc ~ Cm + a * elapsed_s + (C0 - Cm) * exp(-b * elapsed_s),
-                 start   = list(Cm = Cm_start, a = 0, b = 0.001),
-                 control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
-      error = function(e) NULL)
-    if (is.null(fit)) return(NULL)
-    cf    <- stats::coef(fit)
-    b_val <- unname(cf["b"])
-    if (!is.null(kmax) && !is.na(b_val) && b_val > kmax) return(NULL)
-    slope <- cf["a"] + cf["b"] * (cf["Cm"] - C0) * exp(-cf["b"] * t_zero)
-    r_sq  <- if (ss_tot > 0) 1 - sum(stats::residuals(fit)^2) / ss_tot else NA_real_
-    list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_tz",
-         residuals = stats::residuals(fit))
+    res <- .exp_result()
+    if (is.null(res) || (!is.null(kmax) && res$b_param > kmax)) return(NULL)
+    res
   }
 
   if (fit_type == "linear")    return(.lm_result())
   if (fit_type == "quadratic") return(.quad_result())
 
-  if (fit_type == "exp_tz") {
-    Cm_start <- conc[length(conc)]
-    fit <- tryCatch(
-      stats::nls(conc ~ Cm + a * elapsed_s + (C0 - Cm) * exp(-b * elapsed_s),
-                 start   = list(Cm = Cm_start, a = 0, b = 0.001),
-                 control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
-      error = function(e) NULL)
-    if (is.null(fit)) return(list(slope = NA_real_, r_square = NA_real_,
-                                  b_param = NA_real_, fit_used = "exp_tz",
+  if (fit_type %in% c("exp_tz", "exp_zhao18")) {
+    res <- .exp_result(zhao = fit_type == "exp_zhao18")
+    if (is.null(res)) return(list(slope = NA_real_, r_square = NA_real_,
+                                  b_param = NA_real_, fit_used = fit_type,
                                   residuals = NA_real_, kmax_used = NA_real_))
-    cf    <- stats::coef(fit)
-    b_val <- unname(cf["b"])
-    if (!is.null(kappamax) && !is.na(b_val) && b_val > kappamax) {
+    if (!is.null(kappamax) && res$b_param > kappamax) {
       lin <- stats::lm(conc ~ elapsed_s)
       return(list(slope    = unname(stats::coef(lin)[2]),
                   r_square = summary(lin)$r.squared,
-                  b_param  = b_val, fit_used = "linear",
+                  b_param  = res$b_param, fit_used = "linear",
                   residuals = stats::residuals(lin), kmax_used = NA_real_))
     }
-    slope <- cf["a"] + cf["b"] * (cf["Cm"] - C0) * exp(-cf["b"] * t_zero)
-    r_sq  <- if (ss_tot > 0) 1 - sum(stats::residuals(fit)^2) / ss_tot else NA_real_
-    return(list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_tz",
-                residuals = stats::residuals(fit), kmax_used = NA_real_))
-  }
-
-  if (fit_type == "exp_zhao18") {
-    Cm_start <- conc[length(conc)]
-    fit <- tryCatch(
-      stats::nls(conc ~ Cm + a * (elapsed_s - t0) + (C0 - Cm) * exp(-b * (elapsed_s - t0)),
-                 start   = list(Cm = Cm_start, a = 0, b = 0.001, t0 = 0),
-                 control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
-      error = function(e) NULL)
-    if (is.null(fit)) return(list(slope = NA_real_, r_square = NA_real_,
-                                  b_param = NA_real_, fit_used = "exp_zhao18",
-                                  residuals = NA_real_, kmax_used = NA_real_))
-    cf    <- stats::coef(fit)
-    b_val <- unname(cf["b"])
-    if (!is.null(kappamax) && !is.na(b_val) && b_val > kappamax) {
-      lin <- stats::lm(conc ~ elapsed_s)
-      return(list(slope    = unname(stats::coef(lin)[2]),
-                  r_square = summary(lin)$r.squared,
-                  b_param  = b_val, fit_used = "linear",
-                  residuals = stats::residuals(lin), kmax_used = NA_real_))
-    }
-    slope <- cf["a"] + cf["b"] * (cf["Cm"] - C0)
-    r_sq  <- if (ss_tot > 0) 1 - sum(stats::residuals(fit)^2) / ss_tot else NA_real_
-    return(list(slope = unname(slope), r_square = r_sq, b_param = b_val, fit_used = "exp_zhao18",
-                residuals = stats::residuals(fit), kmax_used = NA_real_))
+    return(res)
   }
 
   if (fit_type == "auto") {
@@ -238,7 +252,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
     # Step 2: quadratic \u2014 accept if AICc is lower and the curve decelerates (curvature
     # opposite in sign to the linear slope). A curve bending the other way has "no plausible
     # physical process" and the linear model is preferred (Levy et al. 2011, Eur. J. Soil Sci.
-    # 62:811, p. 817); this also blocks t0-slope sign flips.
+    # 62:811, p. 817, said of exponential models and applied here to the quadratic); this also
+    # blocks t0-slope sign flips.
     quad <- .quad_result()
     quad_aicc <- .aicc(quad)
     if (!is.na(quad_aicc) && !is.na(best_aicc) && quad_aicc < best_aicc &&
@@ -247,9 +262,12 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
       best_aicc <- quad_aicc
     }
 
-    # Step 3: exp_tz with kappamax \u2014 accept if \u03ba passes and AICc is lower
+    # Step 3: exp_tz with kappamax - accept if kappa passes, AICc is lower and the curve levels off:
+    # C''(t) = -b^2 (Cm - C0) exp(-b t), so it bends against the slope only when Cm - C0 has the
+    # sign of the linear slope (concave fits of exponential models: "no plausible physical
+    # process", linear preferred; Levy et al. 2011, p. 817).
     exp_res <- .exp_tz_result(kmax)
-    if (!is.null(exp_res)) {
+    if (!is.null(exp_res) && sign(exp_res$amp) == sign(lm_slope)) {
       exp_aicc <- .aicc(exp_res)
       if (!is.na(exp_aicc) && !is.na(best_aicc) && exp_aicc < best_aicc) best <- exp_res
     }
@@ -377,7 +395,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
       # gated on. When fit_type = "auto", fit_out$fit_used is a resolved literal model name
       # (e.g. "exp_tz"), so passing the outer kappamax (always NULL here) into
       # .fit_ghg_model()'s literal branches would leave every bootstrap replicate ungated and
-      # let nls() silently return degenerate slopes (singular-gradient warning, not an error).
+      # let the exponential refits return strongly curved slopes.
       # Use the kmax that "auto" itself computed and already applied; for non-auto fit_types,
       # kmax_used is NA_real_ (no such gate was computed) and behavior is unchanged - the
       # caller's own explicit kappamax keeps gating every refit exactly as before.
@@ -540,7 +558,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 }
 
 #' @import tibble
-#' @importFrom stats lm coef nls nls.control residuals cor quantile
+#' @importFrom stats lm coef residuals cor quantile
 #' @importFrom purrr map_dfr
 #' @importFrom stringr str_detect
 #' @title calculate_regression
@@ -564,9 +582,17 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   \code{"auto"} (automatic model selection: tries linear -> quadratic -> exp_tz in order,
 #'   accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a
 #'   quadratic only when it levels off rather than accelerates (Levy et al. 2011), and exp_tz only
-#'   when its curvature parameter does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
+#'   when it levels off and its curvature parameter does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
 #'   \code{instrument_precision = NULL}, precision is looked up from \code{\link{analyzer_precision}}
 #'   by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.
+#'   The exponential models and their slope formulas follow fluxible (Gaudard et al. 2025); the curvature
+#'   \code{b} is found by a one-dimensional search, with \code{Cm} and \code{a} solved by least squares for
+#'   each \code{b}. \code{"exp_tz"} fits the initial concentration \code{C0} as well (Kutzbach et al.
+#'   2007); \code{"exp_zhao18"} takes \code{C0} as the first reading. When the best \code{b} lies at the edge of its search range, or the fit does not
+#'   depend on \code{b} (an exact line), the window has no usable curvature: an explicit exponential
+#'   \code{fit_type} gives an \code{NA} slope and flag \code{"no_data"}, and \code{"auto"} keeps the linear or
+#'   quadratic fit. A noisy straight line can still return an exponential slope; use \code{"auto"} when
+#'   curvature is uncertain.
 #' @param t_zero Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.
 #' @param window_type \code{"fixed"} (default; \code{"sliding"} up to aelab 1.1.6)
 #'   fits a single window starting at \code{start_offset_s} seconds after the reference time and
@@ -776,6 +802,18 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' Gaudard, J., et al. (2025). fluxible: An R package to process ecosystem gas fluxes from
 #' closed-loop chambers in an automated and reproducible way. \emph{Methods in Ecology and
 #' Evolution}. \doi{10.1111/2041-210X.70161}
+#'
+#' Zhao, P., Hammerle, A., Zeeman, M., & Wohlfahrt, G. (2018). On the calculation of daytime CO2
+#' fluxes measured by automated closed transparent chambers. \emph{Agricultural and Forest
+#' Meteorology}, 263, 267-275. \doi{10.1016/j.agrformet.2018.08.022}
+#'
+#' Kutzbach, L., et al. (2007). CO2 flux determination by closed-chamber methods can be seriously
+#' biased by inappropriate application of linear regression. \emph{Biogeosciences}, 4, 1005-1025.
+#' \doi{10.5194/bg-4-1005-2007}
+#'
+#' Levy, P. E., et al. (2011). Quantification of uncertainty in trace gas fluxes measured by the
+#' static chamber method. \emph{European Journal of Soil Science}, 62, 811-821.
+#' \doi{10.1111/j.1365-2389.2011.01403.x}
 #'
 #' Kobayashi, A. N. A., Roques, C., Hunkeler, D., & Brunner, P. (2026). Uncertainty
 #' quantification in soil gas fluxes: Reducing the user's arbitrariness. \emph{European Journal
@@ -1390,7 +1428,6 @@ plot_ghg_flux <- function(data, regression_result, ghg,
     # Fitted line over 200 evenly spaced points
     elapsed_seq <- seq(min(elapsed_s), max(elapsed_s), length.out = 200)
     C0          <- conc_vec[1]
-    Cm_start    <- conc_vec[length(conc_vec)]
 
     if (is_split(row)) {
       ds <- as.POSIXct(row$diffusion_start, format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
@@ -1405,26 +1442,11 @@ plot_ghg_flux <- function(data, regression_result, ghg,
     } else if (fit_type == "quadratic") {
       fit    <- stats::lm(conc_vec ~ elapsed_s + I(elapsed_s^2))
       fitted <- stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq))
-    } else if (fit_type == "exp_tz") {
-      fit <- tryCatch(
-        stats::nls(conc_vec ~ Cm + a * elapsed_s + (C0 - Cm) * exp(-b * elapsed_s),
-                   start   = list(Cm = Cm_start, a = 0, b = 0.001),
-                   control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
-        error = function(e) NULL)
-      fitted <- if (!is.null(fit))
-        tryCatch(stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq)),
-                 error = function(e) rep(NA_real_, 200))
-      else rep(NA_real_, 200)
     } else {
-      fit <- tryCatch(
-        stats::nls(conc_vec ~ Cm + a * (elapsed_s - t0) + (C0 - Cm) * exp(-b * (elapsed_s - t0)),
-                   start   = list(Cm = Cm_start, a = 0, b = 0.001, t0 = 0),
-                   control = stats::nls.control(maxiter = 100, warnOnly = TRUE)),
-        error = function(e) NULL)
-      fitted <- if (!is.null(fit))
-        tryCatch(stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq)),
-                 error = function(e) rep(NA_real_, 200))
-      else rep(NA_real_, 200)
+      ef <- .exp_curve_fit(conc_vec, elapsed_s, zhao = fit_type == "exp_zhao18")
+      u  <- elapsed_seq - if (is.null(ef)) 0 else ef$t0
+      fitted <- if (is.null(ef)) rep(NA_real_, 200) else
+        ef$Cm + ef$a * u + (ef$C0 - ef$Cm) * exp(-ef$b * u)
     }
 
     fitted_list[[i]] <- data.frame(site_label = site_label, elapsed_s = elapsed_seq,
