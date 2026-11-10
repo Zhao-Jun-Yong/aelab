@@ -9,11 +9,7 @@ calculate_ghg_flux(
   slope = "slope",
   area = "area",
   volume = "volume",
-  temp = "temp",
-  ch4 = c("linear", "separate"),
-  conc_data = NULL,
-  conc = "CH4",
-  ch4_options = list()
+  temp = "temp"
 )
 }
 \arguments{
@@ -26,104 +22,13 @@ calculate_ghg_flux(
 \item{volume}{Name of the column in `data` that contains values of the volume of the chamber (in litre).}
 
 \item{temp}{Name of the column in `data` that contains values of the temperature of the gas (in Celsius).}
-
-\item{ch4}{\code{"linear"} (default) uses the \code{slope} column as is. \code{"separate"}
-splits each CH4 closure into total, diffusive and ebullitive flux following the automated
-method of Minaudo et al. (2026, pp. 3-4, \doi{10.1002/lom3.70054}; code archive Minaudo 2026,
-\doi{10.5281/zenodo.18710431}). It needs \code{conc_data} and the columns \code{start_time}
-and \code{end_time} in \code{data} (as returned by \code{\link{calculate_regression}});
-\code{slope} is not used. Per closure:
-\itemize{
-  \item Bubbles: the concentration is divided by its mean, its variance is taken in a moving
-    window of readings, and readings whose variance is above a percentile of all variances
-    (minimum 1e-4) are flagged; flagged segments close together are merged and short ones
-    dropped (Minaudo et al. 2026, p. 4).
-  \item No bubble: total = diffusion = the linear slope of the window, ebullition = 0.
-  \item A bubble starting within \code{early_s} seconds: total only (paper p. 4).
-  \item Otherwise: the total is the two-point change of the smoothed series (minimum of the
-    first 30 s, maximum of the last 30 s, each clamped to the readings there, divided by the
-    duration; paper p. 3, Eq. 1); the diffusion is the linear slope of the first linear
-    segment of unflagged readings (paper pp. 3-4): within each unbroken run of unflagged
-    readings, in time order, a window grows from the run start (pass: >= \code{min_diffusion_s}, default 20 s, slope > 0,
-    adjusted R\eqn{^2} >= 0.7, p < 0.05). Passing window ends less than 10 s apart form one
-    block; with one block the best adjusted R\eqn{^2} is taken, with several the last end of
-    the first block (as the code archive); ebullition = total - diffusion.
-}}
-
-\item{conc_data}{Only for \code{ch4 = "separate"}: the concentration readings, with a
-\code{real_datetime} (or \code{date_time}) column and the column named by \code{conc}, in
-ppm (divide LI-COR CH4 ppb by 1000), so the slopes match the unit of \code{slope}.}
-
-\item{conc}{Name of the concentration column in \code{conc_data}. Default \code{"CH4"}.}
-
-\item{ch4_options}{Only for \code{ch4 = "separate"}: a named list overriding any of the
-settings below. Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
-marked \emph{pending} are where the paper and its code archive differ or the paper is
-silent; they were asked of the author (2026-11-10) and the defaults may change.
-\describe{
-  \item{\code{bubble_window}}{Readings in the moving variance window. Default 10 (paper);
-    the code uses 11. \emph{Pending.}}
-  \item{\code{bubble_align}}{Which reading a window's variance belongs to: \code{"centre"}
-    (default; reading 6 of 10), \code{"start"} or \code{"end"}. The paper does not say.
-    \emph{Pending.}}
-  \item{\code{bubble_prob}}{Percentile of the variances above which readings are flagged.
-    Default 0.75 (paper); the code uses 0.7. \emph{Pending.}}
-  \item{\code{merge_gap}}{Flagged segments separated by fewer than this many readings are
-    merged. Default 10 (paper); the code also merges a gap of exactly 10 (\code{11}).
-    \emph{Pending.}}
-  \item{\code{min_len}}{Flagged segments shorter than this many readings are dropped.
-    Default 5 (paper, a 5-reading segment is kept); the code drops it (\code{6}).
-    \emph{Pending.}}
-  \item{\code{early_s}, \code{early_from}}{A bubble starting within \code{early_s} seconds
-    (default 20, paper) of \code{early_from} gives the total only. \code{"window"} (default)
-    counts from the first reading of the window, \code{"placement"} from the column
-    \code{reference_time} of \code{data}. \emph{Pending.}}
-  \item{\code{total_from}}{Start of the total-flux series: \code{"window"} (default; paper,
-    "without any trimming") or \code{"segment"} (the start of the diffusion segment, as in
-    the code). \emph{Pending.}}
-  \item{\code{spar}, \code{nknots_ratio}}{Smoothing of the total-flux series,
-    \code{stats::smooth.spline(spar = spar, nknots = round(nknots_ratio * n))}. Defaults 0.5
-    and 1/3 (code); the published paper gives none, the preprint gives \code{spar = 0.8}.
-    \emph{Pending.}}
-  \item{\code{trim_to_min}}{\code{TRUE} drops the readings before the lowest unflagged
-    reading in the first half of the window, and that reading, before the diffusion segment
-    is searched, so a
-    trace falling after placement does not start the segment. Default \code{TRUE}, as the
-    code archive; not in the paper (the segment there starts one reading after the
-    minimum).}
-  \item{\code{neg_ebullition}}{Negative ebullition (diffusion > total): \code{"zero"}
-    (default, as the code archive and Hoffmann et al. 2017, p. 112), \code{"keep"} or
-    \code{"na"}. The Minaudo paper does not say. \emph{Pending.}}
-  \item{\code{min_rise}}{Bubbles whose rise is \code{<=} this value (in the unit of
-    \code{conc}) are not bubbles. The rise is the last minus the lowest reading, from the
-    reading before the flagged segment to the one after; a falling segment has rise 0. As the
-    \code{concentration_diffusion_cutoff} of FluxSeparator (Sø et al. 2024, p. 5; 1 ppm in
-    its code, no value in the paper). Applied after the early-bubble rule, so it never
-    changes an early-bubble closure; with no bubble left the closure is
-    \code{"no bubble: rises <= min_rise"}. Default 0 (off).}
-  \item{\code{bubble_pad}}{Readings added before and after each flagged segment before the
-    diffusion segment is searched, as FluxSeparator's \code{IndexSpan} (Sø et al. 2024, p. 5;
-    30 in its code). Applied after the early-bubble rule. Default 0.}
-  \item{\code{min_diffusion_s}}{Shortest diffusion segment, in seconds. Default 20 (the
-    code archive's \code{length.min}); FluxSeparator needs more than 50 readings (Sø et al.
-    2024, p. 8).}
-}}
 }
 \value{
-\code{data} with \code{flux} and \code{unit} added. With \code{ch4 = "separate"} also
-  \code{slope_total}, \code{slope_diffusion}, \code{slope_ebullition} (ppm s\eqn{^{-1}}),
-  \code{flux_diffusion}, \code{flux_ebullition}, \code{n_bubbles} and \code{ch4_flag};
-  \code{flux} is then the total flux. \code{ch4_flag} is \code{"no bubble"},
-  \code{"early bubble: total only"}, \code{"too few readings"}, \code{"ok"}, or one or more
-  of these, joined by \code{"; "}: \code{"diffusion > total flux"} (ebullition was negative,
-  see \code{neg_ebullition}); \code{"ebullition < diffusion + SE"} (a review label only,
-  SE = standard error of the diffusion slope: the split may come from a false bubble; the
-  code archive's "ebullition too low to be trusted" uses SE x sqrt(n) instead); \code{"no linear diffusion segment"} (no segment passed; the best-R\eqn{^2} one is
-  used); \code{"diffusion after first bubble"} (the segment starts after the first flagged
-  reading, so back-diffusion may bias it: Minaudo et al. 2026, Guideline 4, p. 10; FluxSeparator
-  uses only readings before the first bubble, Sø et al. 2024, p. 6). \code{ch4_flag} is
-  \code{"no bubble: rises <= min_rise"} when \code{min_rise} removed every bubble. Labels never
-  change the values.
+\code{data} with \code{flux} and \code{unit} added. When \code{data} has
+  \code{slope_diffusion} and \code{slope_ebullition} (from
+  \code{calculate_regression(ch4 = "separate")}), \code{flux_diffusion} and
+  \code{flux_ebullition} are added too; \code{flux} is then the total CH4 flux, because
+  \code{slope} holds the total slope for closures with a bubble.
 }
 \description{
 Calculate the greenhouse gas (GHG) flux based on input parameters from a data frame.
@@ -137,20 +42,4 @@ data <- data.frame(
 )
 results <- calculate_ghg_flux(data)
 print(results)
-}
-\references{
-Minaudo, C., et al. (2026). Uncertainty in aquatic greenhouse gas flux estimates arises from
-subjective processing of floating chamber time series. \emph{Limnology and Oceanography:
-Methods}, 24, e70054. \doi{10.1002/lom3.70054}
-
-Minaudo, C. (2026). camilleminaudo/ghg-flux-expert: Code to reproduce results from Minaudo
-et al., 2026 (v1.0). Zenodo. \doi{10.5281/zenodo.18710431}
-
-Sø, J. S., et al. (2024). Self-made equipment for automatic methane diffusion and ebullition
-measurements from aquatic environments. \emph{Journal of Geophysical Research:
-Biogeosciences}, 129, e2024JG008035. \doi{10.1029/2024JG008035}
-
-Hoffmann, M., et al. (2017). A simple calculation algorithm to separate high-resolution CH4
-flux measurements into ebullition- and diffusion-derived components. \emph{Atmospheric
-Measurement Techniques}, 10, 109-118. \doi{10.5194/amt-10-109-2017}
 }

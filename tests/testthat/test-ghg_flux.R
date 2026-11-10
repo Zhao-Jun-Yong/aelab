@@ -244,57 +244,67 @@ test_that("calculate_ghg_flux uses 3600 s h-1 giving mmol m-2 h-1", {
   expect_equal(result$unit, "mmol m-2 h-1")
 })
 
-test_that("calculate_ghg_flux ch4 = 'separate' splits synthetic CH4 traces", {
-  set.seed(1)
+# CH4 split in calculate_regression(ch4 = "separate"): fixed 299 s window from t0 + off
+ch4_split <- function(ch4, off = 0, ...) {
   t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  d <- data.frame(real_datetime = t0 + seq_along(ch4) - 1, CH4 = ch4)
+  ref <- data.frame(date_time = t0 - off, site = "x", analyzer = "a")
+  calculate_regression(d, ref, "CH4", reference_time = "date_time", site = "site", analyzer_code = "a",
+                       window_type = "fixed", start_offset_s = off, duration_minutes = 299 / 60,
+                       ch4 = "separate", ch4_options = list(...))
+}
+
+test_that("calculate_regression ch4 = 'separate' splits synthetic CH4 traces", {
   sec <- 0:299
-  run <- function(step_at) {
-    ch4 <- 2 + 1e-4 * sec + ifelse(!is.na(step_at) & sec >= step_at, 0.05, 0) + rnorm(300, 0, 3e-4)
-    d <- data.frame(start_time = t0, end_time = t0 + 299, area = 1, volume = 1, temp = 25)
-    calculate_ghg_flux(d, ch4 = "separate",
-                       conc_data = data.frame(real_datetime = t0 + sec, CH4 = ch4))
-  }
-  ramp <- run(NA)
+  trace <- function(step_at) 2 + 1e-4 * sec + ifelse(!is.na(step_at) & sec >= step_at, 0.05, 0) + rnorm(300, 0, 3e-4)
+  set.seed(1); ramp <- ch4_split(trace(NA))
   expect_equal(ramp$ch4_flag, "no bubble")
-  expect_equal(ramp$slope_total, ramp$slope_diffusion)
-  expect_equal(ramp$slope_total, 1e-4, tolerance = 0.05)
+  expect_equal(ramp$slope_total, ramp$slope)
+  expect_equal(ramp$slope_diffusion, ramp$slope)
+  expect_equal(ramp$slope, ramp$slope_regression)
+  expect_equal(ramp$slope, 1e-4, tolerance = 0.05)
   expect_equal(ramp$slope_ebullition, 0)
 
-  step <- run(100)
+  set.seed(1); invisible(trace(NA)); step <- ch4_split(trace(100))
   expect_equal(step$ch4_flag, "ok")
+  expect_equal(step$slope, step$slope_total)
+  expect_equal(step$flag, "ok")
+  expect_false(isTRUE(all.equal(step$slope, step$slope_regression)))
   expect_equal(step$slope_diffusion, 1e-4, tolerance = 0.1)
   expect_equal(step$slope_total, 1e-4 + 0.05 / 299, tolerance = 0.05)
   expect_equal(step$slope_ebullition, step$slope_total - step$slope_diffusion)
-  expect_equal(step$flux, step$flux_diffusion + step$flux_ebullition)
+  fl <- calculate_ghg_flux(cbind(step, area = 1, volume = 1, temp = 25))
+  expect_equal(fl$flux, fl$flux_diffusion + fl$flux_ebullition)
 
-  early <- run(10)
+  early <- ch4_split(trace(10))
   expect_equal(early$ch4_flag, "early bubble: total only")
-  expect_false(is.na(early$slope_total))
+  expect_equal(early$slope, early$slope_total)
   expect_true(is.na(early$slope_diffusion) && is.na(early$slope_ebullition))
 
-  expect_error(calculate_ghg_flux(data.frame(start_time = t0, end_time = t0, area = 1, volume = 1,
-                                             temp = 25), ch4 = "separate"), "conc_data")
+  # the default leaves calculate_regression unchanged
+  plain <- calculate_regression(data.frame(real_datetime = as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei") + sec,
+                                           CH4 = trace(100)),
+                                data.frame(date_time = as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei"), site = "x", analyzer = "a"),
+                                "CH4", reference_time = "date_time", site = "site", analyzer_code = "a",
+                                window_type = "fixed", duration_minutes = 299 / 60)
+  expect_false(any(c("slope_total", "ch4_flag") %in% names(plain)))
+  expect_false("flux_diffusion" %in% names(calculate_ghg_flux(cbind(plain, area = 1, volume = 1, temp = 25))))
 })
 
 test_that("ch4_options change the early-bubble origin and negative ebullition", {
   set.seed(2)
-  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
   sec <- 0:299
   ch4 <- 2 + 1e-4 * sec + ifelse(sec >= 10, 0.05, 0) + rnorm(300, 0, 3e-4)
-  cd <- data.frame(real_datetime = t0 + sec, CH4 = ch4)
   # window starts 30 s after placement: a bubble 10 s into the window is 40 s after placement
-  d <- data.frame(start_time = t0, end_time = t0 + 299, reference_time = t0 - 30,
-                  area = 1, volume = 1, temp = 25)
-  win <- calculate_ghg_flux(d, ch4 = "separate", conc_data = cd)
-  plc <- calculate_ghg_flux(d, ch4 = "separate", conc_data = cd,
-                            ch4_options = list(early_from = "placement"))
+  win <- ch4_split(ch4, off = 30)
+  plc <- ch4_split(ch4, off = 30, early_from = "placement")
   expect_equal(win$ch4_flag, "early bubble: total only")
   expect_false(is.na(plc$slope_diffusion))
 
   # fast rise that levels off at 60 s, bubble at 100 s: the early diffusion slope > total
-  cd2 <- data.frame(real_datetime = t0 + sec, CH4 = 2 + 1e-3 * pmin(sec, 60) + ifelse(sec >= 100, 0.05, 0) + rnorm(300, 0, 3e-4))
-  r0 <- calculate_ghg_flux(d, ch4 = "separate", conc_data = cd2)
-  rk <- calculate_ghg_flux(d, ch4 = "separate", conc_data = cd2, ch4_options = list(neg_ebullition = "keep"))
+  cd2 <- 2 + 1e-3 * pmin(sec, 60) + ifelse(sec >= 100, 0.05, 0) + rnorm(300, 0, 3e-4)
+  r0 <- ch4_split(cd2)
+  rk <- ch4_split(cd2, neg_ebullition = "keep")
   expect_equal(r0$ch4_flag, "diffusion > total flux")
   expect_equal(r0$slope_ebullition, 0)
   expect_lt(rk$slope_ebullition, 0)
@@ -302,51 +312,42 @@ test_that("ch4_options change the early-bubble origin and negative ebullition", 
   # trace falls for 40 s after placement, then rises 1e-4 ppm/s, bubble at 150 s
   fall <- 2 + ifelse(sec < 40, -2e-4 * sec, -8e-3 + 1e-4 * (sec - 40)) +
     ifelse(sec >= 150, 0.05, 0) + rnorm(300, 0, 1e-4)
-  cd3 <- data.frame(real_datetime = t0 + sec, CH4 = fall)
-  tr <- calculate_ghg_flux(d, ch4 = "separate", conc_data = cd3, ch4_options = list(trim_to_min = TRUE))
+  tr <- ch4_split(fall, trim_to_min = TRUE)
   expect_equal(tr$slope_diffusion, 1e-4, tolerance = 0.1)
 
-  expect_error(calculate_ghg_flux(d, ch4 = "separate", conc_data = cd, ch4_options = list(sparr = 1)),
-               "Unknown ch4_options")
+  expect_error(ch4_split(ch4, sparr = 1), "Unknown ch4_options")
 })
 
 test_that("ch4_options min_rise, bubble_pad and min_diffusion_s", {
-  set.seed(3)
-  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
   sec <- 0:299
-  d <- data.frame(start_time = t0, end_time = t0 + 299, area = 1, volume = 1, temp = 25)
-  run <- function(step_at, ...) {
-    ch4 <- 2 + 1e-4 * sec + ifelse(sec >= step_at, 0.05, 0) + rnorm(300, 0, 3e-4)
-    calculate_ghg_flux(d, ch4 = "separate", conc_data = data.frame(real_datetime = t0 + sec, CH4 = ch4),
-                       ch4_options = list(...))
-  }
-  set.seed(3); base <- run(100)
-  set.seed(3); same <- run(100, min_rise = 0, bubble_pad = 0, min_diffusion_s = 20)
-  expect_equal(same, base)
+  trace <- function(step_at) { set.seed(3); 2 + 1e-4 * sec + ifelse(sec >= step_at, 0.05, 0) + rnorm(300, 0, 3e-4) }
+  base <- ch4_split(trace(100))
+  expect_equal(ch4_split(trace(100), min_rise = 0, bubble_pad = 0, min_diffusion_s = 20), base)
 
   # a 0.05 ppm step is a bubble above min_rise 0.01, not above 0.1
-  set.seed(3); kept <- run(100, min_rise = 0.01)
-  set.seed(3); gone <- run(100, min_rise = 0.1)
+  kept <- ch4_split(trace(100), min_rise = 0.01)
+  gone <- ch4_split(trace(100), min_rise = 0.1)
   expect_equal(kept$slope_diffusion, base$slope_diffusion)
   expect_equal(gone$ch4_flag, "no bubble: rises <= min_rise")
   expect_equal(gone$slope_ebullition, 0)
+  expect_equal(gone$slope, gone$slope_regression)
   expect_equal(gone$slope_total, gone$slope_diffusion)
 
   # padding over the whole window leaves no unflagged readings for the diffusion
-  set.seed(3); padded <- run(100, bubble_pad = 300)
+  padded <- ch4_split(trace(100), bubble_pad = 300)
   expect_equal(padded$ch4_flag, "no linear diffusion segment")
   expect_true(is.na(padded$slope_diffusion))
 
   # bubble at 40 s: the run before it is long enough for 20 s, not for 60 s
-  set.seed(3); short <- run(40)
-  set.seed(3); long <- run(40, min_diffusion_s = 60)
+  short <- ch4_split(trace(40))
+  long <- ch4_split(trace(40), min_diffusion_s = 60)
   expect_false(grepl("diffusion after first bubble", short$ch4_flag))
   expect_match(long$ch4_flag, "diffusion after first bubble")
   expect_equal(long$slope_diffusion, 1e-4, tolerance = 0.1)
 
-  expect_error(run(100, bubble_pad = 1.5), "bubble_pad")
-  expect_error(run(100, min_rise = -1), "min_rise")
-  expect_error(run(100, min_diffusion_s = 0), "min_diffusion_s")
+  expect_error(ch4_split(trace(100), bubble_pad = 1.5), "bubble_pad")
+  expect_error(ch4_split(trace(100), min_rise = -1), "min_rise")
+  expect_error(ch4_split(trace(100), min_diffusion_s = 0), "min_diffusion_s")
 })
 
 test_that("convert_ghg_unit converts correctly", {

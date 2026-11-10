@@ -1,15 +1,18 @@
 # aelab (development version)
 
-## CH4 bubble flux (`calculate_ghg_flux()`)
+## CH4 bubble flux (`calculate_regression()`)
 
-* New `ch4 = "separate"` (default `"linear"`, unchanged) splits each CH4 closure into total,
-  diffusive and ebullitive flux with the automated method of Minaudo et al. (2026, *Limnology and
-  Oceanography: Methods* 24, e70054, pp. 3-4, doi:10.1002/lom3.70054; code archive Minaudo 2026,
-  Zenodo, doi:10.5281/zenodo.18710431): running-variance bubble detection, total only when a bubble
-  starts in the first 20 s, two-point total from the smoothed full window, linear diffusion on the
-  first linear segment of unflagged readings. Needs the readings (`conc_data`, in ppm) and the
-  `start_time`/`end_time` of each window. New output columns `slope_total`, `slope_diffusion`,
-  `slope_ebullition`, `flux_diffusion`, `flux_ebullition`, `n_bubbles` and `ch4_flag`.
+* New `ch4 = "separate"` in `calculate_regression()` (default `"regression"`, unchanged) splits each
+  CH4 closure into total, diffusive and ebullitive slopes with the automated method of Minaudo et al.
+  (2026, *Limnology and Oceanography: Methods* 24, e70054, pp. 3-4, doi:10.1002/lom3.70054; code
+  archive Minaudo 2026, Zenodo, doi:10.5281/zenodo.18710431): running-variance bubble detection,
+  total only when a bubble starts in the first 20 s, two-point total from the smoothed full window,
+  linear diffusion on the first linear segment of unflagged readings. The split runs on each
+  closure's final window. For closures with a bubble, `slope` is the total slope and `flag` is
+  `"ok"`; the regression slope is kept in `slope_regression`. New columns `slope_regression`,
+  `slope_total`, `slope_diffusion`, `slope_ebullition`, `n_bubbles` and `ch4_flag`.
+* `calculate_ghg_flux()` adds `flux_diffusion` and `flux_ebullition` when `slope_diffusion` and
+  `slope_ebullition` are present; `flux` is then the total CH4 flux.
 * `ch4_options` sets the detection window, its alignment, percentile, merge gap, minimum
   segment length, the 20 s early-bubble rule and its origin, the total-flux start, the smoothing
   and the treatment of negative ebullition. Defaults follow the paper text; where the paper and
@@ -18,8 +21,8 @@
   unchanged: `min_rise` (bubbles with a smaller rise are not bubbles), `bubble_pad` (readings
   added around each bubble before the diffusion search) and `min_diffusion_s` (shortest
   diffusion segment, default 20 s).
-* New review label `"diffusion after first bubble"` in `ch4_flag` (Minaudo et al. 2026, Guideline 4;
-  Sø et al. 2024, p. 6). Labels change no values.
+* Review labels in `ch4_flag`, which change no values, include `"diffusion after first bubble"`
+  (Minaudo et al. 2026, Guideline 4; Sø et al. 2024, p. 6).
 
 ## Flux QC changes (`calculate_regression()`) — slopes and flags change on re-run
 
