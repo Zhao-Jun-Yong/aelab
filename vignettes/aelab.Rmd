@@ -206,6 +206,25 @@ flux_ch4 <- data.frame(
 calculate_ghg_flux(flux_ch4)
 ```
 
+### Separating CH4 diffusion and ebullition
+
+With `ch4 = "separate"`, `calculate_ghg_flux()` splits each CH4 closure into total, diffusive and ebullitive flux following the automated method of Minaudo et al. (2026, *Limnology and Oceanography: Methods* 24, e70054, pp. 3-4), with its code archive (Minaudo 2026, Zenodo, doi:10.5281/zenodo.18710431). It needs the readings (`conc_data`, in ppm) and the `start_time`/`end_time` of each window, as `calculate_regression()` returns them. Settings that are still being checked with the author are in `ch4_options`; see `?calculate_ghg_flux`.
+
+```{r}
+t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+sec <- 0:299
+set.seed(1)
+# 0.1 ppb/s diffusion and one 50 ppb bubble at 100 s, in ppm
+readings <- data.frame(real_datetime = t0 + sec,
+                       CH4 = (2000 + 0.1 * sec + ifelse(sec >= 100, 50, 0) + rnorm(300, 0, 0.3)) / 1000)
+window <- data.frame(start_time = t0, end_time = t0 + 299, area = 1, volume = 1, temp = 25)
+res <- calculate_ghg_flux(window, ch4 = "separate", conc_data = readings)
+res[, c("slope_total", "slope_diffusion", "slope_ebullition", "flux", "flux_diffusion",
+        "flux_ebullition", "ch4_flag")]
+```
+
+`ch4_flag` labels closures to look at by eye (for example `"ebullition < diffusion + SE"`); the labels never change the values.
+
 ## Additional GHG tools
 
 ### `convert_ghg_unit()`

@@ -1,5 +1,20 @@
 # aelab (development version)
 
+## CH4 bubble flux (`calculate_ghg_flux()`)
+
+* New `ch4 = "separate"` (default `"linear"`, unchanged) splits each CH4 closure into total,
+  diffusive and ebullitive flux with the automated method of Minaudo et al. (2026, *Limnology and
+  Oceanography: Methods* 24, e70054, pp. 3-4, doi:10.1002/lom3.70054; code archive Minaudo 2026,
+  Zenodo, doi:10.5281/zenodo.18710431): running-variance bubble detection, total only when a bubble
+  starts in the first 20 s, two-point total from the smoothed full window, linear diffusion on the
+  first linear segment of unflagged readings. Needs the readings (`conc_data`, in ppm) and the
+  `start_time`/`end_time` of each window. New output columns `slope_total`, `slope_diffusion`,
+  `slope_ebullition`, `flux_diffusion`, `flux_ebullition`, `n_bubbles` and `ch4_flag`.
+* `ch4_options` sets the detection window, its alignment, percentile, merge gap, minimum
+  segment length, the 20 s early-bubble rule and its origin, the total-flux start, the smoothing
+  and the treatment of negative ebullition. Defaults follow the paper text; where the paper and
+  its code differ or the paper is silent, the setting is marked pending the author's reply.
+
 ## Flux QC changes (`calculate_regression()`) — slopes and flags change on re-run
 
 * `fit_type = "auto"` accepts a quadratic or exponential fit only when its AICc is lower than the

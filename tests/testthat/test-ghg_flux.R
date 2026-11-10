@@ -244,6 +244,72 @@ test_that("calculate_ghg_flux uses 3600 s h-1 giving mmol m-2 h-1", {
   expect_equal(result$unit, "mmol m-2 h-1")
 })
 
+test_that("calculate_ghg_flux ch4 = 'separate' splits synthetic CH4 traces", {
+  set.seed(1)
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  sec <- 0:299
+  run <- function(step_at) {
+    ch4 <- 2 + 1e-4 * sec + ifelse(!is.na(step_at) & sec >= step_at, 0.05, 0) + rnorm(300, 0, 3e-4)
+    d <- data.frame(start_time = t0, end_time = t0 + 299, area = 1, volume = 1, temp = 25)
+    calculate_ghg_flux(d, ch4 = "separate",
+                       conc_data = data.frame(real_datetime = t0 + sec, CH4 = ch4))
+  }
+  ramp <- run(NA)
+  expect_equal(ramp$ch4_flag, "no bubble")
+  expect_equal(ramp$slope_total, ramp$slope_diffusion)
+  expect_equal(ramp$slope_total, 1e-4, tolerance = 0.05)
+  expect_equal(ramp$slope_ebullition, 0)
+
+  step <- run(100)
+  expect_equal(step$ch4_flag, "ok")
+  expect_equal(step$slope_diffusion, 1e-4, tolerance = 0.1)
+  expect_equal(step$slope_total, 1e-4 + 0.05 / 299, tolerance = 0.05)
+  expect_equal(step$slope_ebullition, step$slope_total - step$slope_diffusion)
+  expect_equal(step$flux, step$flux_diffusion + step$flux_ebullition)
+
+  early <- run(10)
+  expect_equal(early$ch4_flag, "early bubble: total only")
+  expect_false(is.na(early$slope_total))
+  expect_true(is.na(early$slope_diffusion) && is.na(early$slope_ebullition))
+
+  expect_error(calculate_ghg_flux(data.frame(start_time = t0, end_time = t0, area = 1, volume = 1,
+                                             temp = 25), ch4 = "separate"), "conc_data")
+})
+
+test_that("ch4_options change the early-bubble origin and negative ebullition", {
+  set.seed(2)
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  sec <- 0:299
+  ch4 <- 2 + 1e-4 * sec + ifelse(sec >= 10, 0.05, 0) + rnorm(300, 0, 3e-4)
+  cd <- data.frame(real_datetime = t0 + sec, CH4 = ch4)
+  # window starts 30 s after placement: a bubble 10 s into the window is 40 s after placement
+  d <- data.frame(start_time = t0, end_time = t0 + 299, reference_time = t0 - 30,
+                  area = 1, volume = 1, temp = 25)
+  win <- calculate_ghg_flux(d, ch4 = "separate", conc_data = cd)
+  plc <- calculate_ghg_flux(d, ch4 = "separate", conc_data = cd,
+                            ch4_options = list(early_from = "placement"))
+  expect_equal(win$ch4_flag, "early bubble: total only")
+  expect_false(is.na(plc$slope_diffusion))
+
+  # fast rise that levels off at 60 s, bubble at 100 s: the early diffusion slope > total
+  cd2 <- data.frame(real_datetime = t0 + sec, CH4 = 2 + 1e-3 * pmin(sec, 60) + ifelse(sec >= 100, 0.05, 0) + rnorm(300, 0, 3e-4))
+  r0 <- calculate_ghg_flux(d, ch4 = "separate", conc_data = cd2)
+  rk <- calculate_ghg_flux(d, ch4 = "separate", conc_data = cd2, ch4_options = list(neg_ebullition = "keep"))
+  expect_equal(r0$ch4_flag, "diffusion > total flux")
+  expect_equal(r0$slope_ebullition, 0)
+  expect_lt(rk$slope_ebullition, 0)
+
+  # trace falls for 40 s after placement, then rises 1e-4 ppm/s, bubble at 150 s
+  fall <- 2 + ifelse(sec < 40, -2e-4 * sec, -8e-3 + 1e-4 * (sec - 40)) +
+    ifelse(sec >= 150, 0.05, 0) + rnorm(300, 0, 1e-4)
+  cd3 <- data.frame(real_datetime = t0 + sec, CH4 = fall)
+  tr <- calculate_ghg_flux(d, ch4 = "separate", conc_data = cd3, ch4_options = list(trim_to_min = TRUE))
+  expect_equal(tr$slope_diffusion, 1e-4, tolerance = 0.1)
+
+  expect_error(calculate_ghg_flux(d, ch4 = "separate", conc_data = cd, ch4_options = list(sparr = 1)),
+               "Unknown ch4_options")
+})
+
 test_that("convert_ghg_unit converts correctly", {
   result <- convert_ghg_unit(1, "co2", mass = "mmol")
   expect_equal(result, 44010, tolerance = 1)  # 1 mmol co2 = 44.01g/mol * 1000 µg/mg * 1000 = 44010 µg

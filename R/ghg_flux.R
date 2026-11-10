@@ -1200,7 +1200,88 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #' @param area Name of the column in `data` that contains the values of the area of the chamber (in square meter).
 #' @param volume Name of the column in `data` that contains values of the volume of the chamber (in litre).
 #' @param temp Name of the column in `data` that contains values of the temperature of the gas (in Celsius).
-#' @return A list containing the calculated flux and its unit.
+#' @param ch4 \code{"linear"} (default) uses the \code{slope} column as is. \code{"separate"}
+#'   splits each CH4 closure into total, diffusive and ebullitive flux following the automated
+#'   method of Minaudo et al. (2026, pp. 3-4, \doi{10.1002/lom3.70054}; code archive Minaudo 2026,
+#'   \doi{10.5281/zenodo.18710431}). It needs \code{conc_data} and the columns \code{start_time}
+#'   and \code{end_time} in \code{data} (as returned by \code{\link{calculate_regression}});
+#'   \code{slope} is not used. Per closure:
+#'   \itemize{
+#'     \item Bubbles: the concentration is divided by its mean, its variance is taken in a moving
+#'       window of readings, and readings whose variance is above a percentile of all variances
+#'       (minimum 1e-4) are flagged; flagged segments close together are merged and short ones
+#'       dropped (Minaudo et al. 2026, p. 4).
+#'     \item No bubble: total = diffusion = the linear slope of the window, ebullition = 0.
+#'     \item A bubble starting within \code{early_s} seconds: total only (paper p. 4).
+#'     \item Otherwise: the total is the two-point change of the smoothed series (minimum of the
+#'       first 30 s, maximum of the last 30 s, each clamped to the readings there, divided by the
+#'       duration; paper p. 3, Eq. 1); the diffusion is the linear slope of the first linear
+#'       segment of unflagged readings (paper pp. 3-4): within each unbroken run of unflagged
+#'       readings, in time order, a window grows from the run start (pass: >= 20 s, slope > 0,
+#'       adjusted R\eqn{^2} >= 0.7, p < 0.05). Passing window ends less than 10 s apart form one
+#'       block; with one block the best adjusted R\eqn{^2} is taken, with several the last end of
+#'       the first block (as the code archive); ebullition = total - diffusion.
+#'   }
+#' @param conc_data Only for \code{ch4 = "separate"}: the concentration readings, with a
+#'   \code{real_datetime} (or \code{date_time}) column and the column named by \code{conc}, in
+#'   ppm (divide LI-COR CH4 ppb by 1000), so the slopes match the unit of \code{slope}.
+#' @param conc Name of the concentration column in \code{conc_data}. Default \code{"CH4"}.
+#' @param ch4_options Only for \code{ch4 = "separate"}: a named list overriding any of the
+#'   settings below. Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
+#'   marked \emph{pending} are where the paper and its code archive differ or the paper is
+#'   silent; they were asked of the author (2026-11-10) and the defaults may change.
+#'   \describe{
+#'     \item{\code{bubble_window}}{Readings in the moving variance window. Default 10 (paper);
+#'       the code uses 11. \emph{Pending.}}
+#'     \item{\code{bubble_align}}{Which reading a window's variance belongs to: \code{"centre"}
+#'       (default; reading 6 of 10), \code{"start"} or \code{"end"}. The paper does not say.
+#'       \emph{Pending.}}
+#'     \item{\code{bubble_prob}}{Percentile of the variances above which readings are flagged.
+#'       Default 0.75 (paper); the code uses 0.7. \emph{Pending.}}
+#'     \item{\code{merge_gap}}{Flagged segments separated by fewer than this many readings are
+#'       merged. Default 10 (paper); the code also merges a gap of exactly 10 (\code{11}).
+#'       \emph{Pending.}}
+#'     \item{\code{min_len}}{Flagged segments shorter than this many readings are dropped.
+#'       Default 5 (paper, a 5-reading segment is kept); the code drops it (\code{6}).
+#'       \emph{Pending.}}
+#'     \item{\code{early_s}, \code{early_from}}{A bubble starting within \code{early_s} seconds
+#'       (default 20, paper) of \code{early_from} gives the total only. \code{"window"} (default)
+#'       counts from the first reading of the window, \code{"placement"} from the column
+#'       \code{reference_time} of \code{data}. \emph{Pending.}}
+#'     \item{\code{total_from}}{Start of the total-flux series: \code{"window"} (default; paper,
+#'       "without any trimming") or \code{"segment"} (the start of the diffusion segment, as in
+#'       the code). \emph{Pending.}}
+#'     \item{\code{spar}, \code{nknots_ratio}}{Smoothing of the total-flux series,
+#'       \code{stats::smooth.spline(spar = spar, nknots = round(nknots_ratio * n))}. Defaults 0.5
+#'       and 1/3 (code); the published paper gives none, the preprint gives \code{spar = 0.8}.
+#'       \emph{Pending.}}
+#'     \item{\code{trim_to_min}}{\code{TRUE} drops the readings before the lowest unflagged
+#'       reading in the first half of the window, and that reading, before the diffusion segment
+#'       is searched, so a
+#'       trace falling after placement does not start the segment. Default \code{TRUE}, as the
+#'       code archive; not in the paper (the segment there starts one reading after the
+#'       minimum).}
+#'     \item{\code{neg_ebullition}}{Negative ebullition (diffusion > total): \code{"zero"}
+#'       (default, as the code), \code{"keep"} or \code{"na"}. The paper does not say.
+#'       \emph{Pending.}}
+#'   }
+#' @return \code{data} with \code{flux} and \code{unit} added. With \code{ch4 = "separate"} also
+#'   \code{slope_total}, \code{slope_diffusion}, \code{slope_ebullition} (ppm s\eqn{^{-1}}),
+#'   \code{flux_diffusion}, \code{flux_ebullition}, \code{n_bubbles} and \code{ch4_flag};
+#'   \code{flux} is then the total flux. \code{ch4_flag} is \code{"no bubble"},
+#'   \code{"early bubble: total only"}, \code{"too few readings"}, \code{"ok"}, or one or more
+#'   of these, joined by \code{"; "}: \code{"diffusion > total flux"} (ebullition was negative,
+#'   see \code{neg_ebullition}); \code{"ebullition < diffusion + SE"} (a review label only,
+#'   SE = standard error of the diffusion slope: the split may come from a false bubble; the
+#'   code archive's "ebullition too low to be trusted" uses SE x sqrt(n) instead); \code{"no linear diffusion segment"} (no segment passed; the best-R\eqn{^2} one is
+#'   used). Labels never change the values.
+#' @references
+#' Minaudo, C., et al. (2026). Uncertainty in aquatic greenhouse gas flux estimates arises from
+#' subjective processing of floating chamber time series. \emph{Limnology and Oceanography:
+#' Methods}, 24, e70054. \doi{10.1002/lom3.70054}
+#'
+#' Minaudo, C. (2026). camilleminaudo/ghg-flux-expert: Code to reproduce results from Minaudo
+#' et al., 2026 (v1.0). Zenodo. \doi{10.5281/zenodo.18710431}
 #' @examples
 #' data <- data.frame(
 #'   slope = c(1.2, 1.5, 1.1),
@@ -1212,34 +1293,202 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #' print(results)
 #' @export
 
-calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "volume", temp = "temp") {
+calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "volume", temp = "temp",
+                               ch4 = c("linear", "separate"), conc_data = NULL, conc = "CH4",
+                               ch4_options = list()) {
+
+  ch4 <- match.arg(ch4)
 
   # Constants
-  s_to_hr <- (1/3600)  # seconds to hours (3600 s h\u207b\u00b9)
-  gas_constant <- 0.082057  # gas constant (L\u00b7atm\u00b7K\u207b\u00b9\u00b7mol\u207b\u00b9)
+  s_to_hr <- (1/3600)  # seconds to hours (3600 s h⁻¹)
+  gas_constant <- 0.082057  # gas constant (L·atm·K⁻¹·mol⁻¹)
   celsius_to_kelvin <- 273.15  # Celsius to Kelvin conversion
   micro_to_milli <- 0.001  # micromoles to millimoles conversion
 
   # Check if specified columns exist in the data frame
-  required_cols <- c(slope, area, volume, temp)
+  required_cols <- c(if (ch4 == "linear") slope else c("start_time", "end_time"), area, volume, temp)
   if (!all(required_cols %in% names(data))) {
     stop("One or more specified columns do not exist in the data frame.")
   }
 
   # Extract values from the data frame
-  slope <- data[[slope]]
   area <- data[[area]]
   volume <- data[[volume]]
   temp <- data[[temp]]
-
-  # Calculate flux
-  data$flux <- (slope * volume * (1/s_to_hr) * micro_to_milli) /
+  to_flux <- function(s) (s * volume * (1/s_to_hr) * micro_to_milli) /
     (gas_constant * (temp + celsius_to_kelvin) * area)
+
+  if (ch4 == "linear") {
+    data$flux <- to_flux(data[[slope]])
+  } else {
+    opt <- list(bubble_window = 10, bubble_align = "centre", bubble_prob = 0.75, merge_gap = 10,
+                min_len = 5, early_s = 20, early_from = "window", total_from = "window",
+                spar = 0.5, nknots_ratio = 1/3, trim_to_min = TRUE, neg_ebullition = "zero")
+    unknown <- setdiff(names(ch4_options), names(opt))
+    if (length(unknown)) stop("Unknown ch4_options: ", paste(unknown, collapse = ", "))
+    opt[names(ch4_options)] <- ch4_options
+    opt$bubble_align   <- match.arg(opt$bubble_align, c("centre", "start", "end"))
+    opt$early_from     <- match.arg(opt$early_from, c("window", "placement"))
+    opt$total_from     <- match.arg(opt$total_from, c("window", "segment"))
+    opt$neg_ebullition <- match.arg(opt$neg_ebullition, c("zero", "keep", "na"))
+    if (is.null(conc_data) || !conc %in% names(conc_data)) {
+      stop("ch4 = 'separate' needs conc_data with a '", conc, "' column.")
+    }
+    if (opt$early_from == "placement" && !"reference_time" %in% names(data)) {
+      stop("early_from = 'placement' needs a reference_time column in data.")
+    }
+    when <- if ("real_datetime" %in% names(conc_data)) conc_data$real_datetime else conc_data$date_time
+    when <- lubridate::force_tz(when, tzone = "Asia/Taipei")
+    as_dt <- function(x) if (is.character(x)) lubridate::ymd_hms(x, tz = "Asia/Taipei") else
+      lubridate::force_tz(x, tzone = "Asia/Taipei")
+    t0 <- as_dt(data$start_time)
+    t1 <- as_dt(data$end_time)
+    t_ref <- if (opt$early_from == "placement") as.numeric(as_dt(data$reference_time)) else rep(NA_real_, nrow(data))
+    parts <- lapply(seq_len(nrow(data)), function(i) {
+      keep <- !is.na(when) & !is.na(conc_data[[conc]]) & when >= t0[i] & when <= t1[i]
+      .separate_ch4(as.numeric(when[keep]), as.numeric(conc_data[[conc]][keep]), opt, t_ref[i])
+    })
+    parts <- do.call(rbind, parts)
+    data$slope_total      <- parts$total
+    data$slope_diffusion  <- parts$diffusion
+    data$slope_ebullition <- parts$ebullition
+    data$flux             <- to_flux(parts$total)
+    data$flux_diffusion   <- to_flux(parts$diffusion)
+    data$flux_ebullition  <- to_flux(parts$ebullition)
+    data$n_bubbles        <- parts$n_bubbles
+    data$ch4_flag         <- parts$ch4_flag
+  }
 
   # Set unit of the result
   data$unit <- "mmol m-2 h-1"
 
   return(data)
+}
+
+# Bubble detection of Minaudo et al. (2026, p. 4): logical flag per reading.
+.find_ch4_bubbles <- function(conc, window = 10, align = "centre", prob = 0.75, min_thresh = 1e-4,
+                              merge_gap = 10, min_len = 5) {
+  n <- length(conc)
+  flag <- rep(FALSE, n)
+  if (n < window + 1) return(flag)
+  z <- conc / mean(conc)
+  first <- seq_len(n - window + 1)  # first reading of each window
+  v <- vapply(first, function(s) stats::var(z[s:(s + window - 1)]), numeric(1))
+  owner <- first + switch(align, centre = window %/% 2, start = 0, end = window - 1)
+  r <- rle(v > max(min_thresh, stats::quantile(v, prob)))
+  # merge high runs split by fewer than merge_gap low windows
+  inner <- seq_along(r$values) > 1 & seq_along(r$values) < length(r$values)
+  r$values[!r$values & r$lengths < merge_gap & inner] <- TRUE
+  r <- rle(inverse.rle(r))
+  r$values[r$values & r$lengths < min_len] <- FALSE
+  flag[owner] <- inverse.rle(r)
+  flag
+}
+
+.lm_ch4 <- function(t, conc) {
+  f <- summary(stats::lm(conc ~ t))
+  c(slope = f$coefficients[2, 1], r2 = f$adj.r.squared, p = f$coefficients[2, 4], se = f$coefficients[2, 2])
+}
+
+# First linear segment (>= min_s) of unflagged readings: within each unbroken run, in time order,
+# grow a window from the run start; window ends passing slope > 0, adj. R2 >= 0.7, p < 0.05
+# that are < 10 s apart form one block: one block -> best adj. R2, several -> last end of the
+# first block (as the code archive; it reproduced 5 of 6 changed eye-accepted CarbonIMTA splits
+# exactly, 2026-11-10). If none passes, the best-R2 window of the
+# first long-enough run (ok = FALSE); fit = NULL when no run is long enough.
+# The code archive's 100 s moving-window rising-slope check is not used: with trim_to_min on it
+# changed no diffusion value (> 1%) in 97 bubbly CarbonIMTA closures (2026-11-10).
+.first_linear_ch4 <- function(t, conc, flag, min_s = 20, gap_s = 10) {
+  r <- rle(!flag)
+  ends <- cumsum(r$lengths)
+  starts <- ends - r$lengths + 1
+  fallback <- NULL
+  for (k in which(r$values)) {
+    idx <- starts[k]:ends[k]
+    tt <- t[idx]
+    if (max(tt) - tt[1] < min_s) next
+    js <- which(tt - tt[1] >= min_s)
+    fits <- t(vapply(js, function(j) .lm_ch4(tt[1:j], conc[idx[1:j]]), numeric(4)))
+    fits <- cbind(fits, start = tt[1], end = tt[js])
+    pass <- fits[, "slope"] > 0 & fits[, "r2"] >= 0.7 & fits[, "p"] < 0.05
+    if (any(pass)) {
+      ok_i <- which(pass)
+      brk <- which(diff(fits[ok_i, "end"]) > gap_s)
+      best <- if (length(brk)) ok_i[brk[1]] else ok_i[which.max(fits[ok_i, "r2"])]
+      return(list(fit = fits[best, ], ok = TRUE))
+    }
+    if (is.null(fallback)) fallback <- fits[which.max(fits[, "r2"]), ]
+  }
+  list(fit = fallback, ok = FALSE)
+}
+
+# Two-point total from the smoothed series (Minaudo et al. 2026, p. 3, Eq. 1)
+.total_ch4 <- function(tt, conc, spar, nknots_ratio, edge_s = 30) {
+  tt <- tt - tt[1]
+  sm <- stats::predict(stats::smooth.spline(tt, conc, nknots = round(nknots_ratio * length(tt)),
+                                            spar = spar), tt)$y
+  first <- tt < edge_s
+  last <- tt > max(tt) - edge_s
+  clamp <- function(x, ref) min(max(x, min(ref)), max(ref))
+  (clamp(max(sm[last]), conc[last]) - clamp(min(sm[first]), conc[first])) / max(tt)
+}
+
+# Total / diffusion / ebullition split of one CH4 closure (Minaudo et al. 2026, pp. 3-4).
+# time in seconds; t_ref = placement time for early_from = "placement".
+.separate_ch4 <- function(time, conc, opt, t_ref = NA_real_) {
+  out <- data.frame(total = NA_real_, diffusion = NA_real_, ebullition = NA_real_,
+                    n_bubbles = NA_integer_, ch4_flag = "too few readings")
+  o <- order(time)
+  time <- time[o]; conc <- conc[o]
+  keep <- !duplicated(time)
+  time <- time[keep]; conc <- conc[keep]
+  if (length(time) < 20) return(out)
+  tt <- time - time[1]
+
+  flag <- .find_ch4_bubbles(conc, opt$bubble_window, opt$bubble_align, opt$bubble_prob,
+                            merge_gap = opt$merge_gap, min_len = opt$min_len)
+  out$n_bubbles <- sum(rle(flag)$values)
+
+  if (!any(flag)) {
+    s <- .lm_ch4(tt, conc)[["slope"]]
+    out[c("total", "diffusion", "ebullition", "ch4_flag")] <- list(s, s, 0, "no bubble")
+    return(out)
+  }
+
+  window_total <- .total_ch4(tt, conc, opt$spar, opt$nknots_ratio)
+  t_early <- if (opt$early_from == "placement") time[which(flag)[1]] - t_ref else tt[which(flag)[1]]
+  if (t_early <= opt$early_s) {
+    out[c("total", "ch4_flag")] <- list(window_total, "early bubble: total only")
+    return(out)
+  }
+
+  excl <- flag
+  if (isTRUE(opt$trim_to_min) && any(!flag & tt < max(tt) / 2)) {
+    early <- which(!flag & tt < max(tt) / 2)
+    # the lowest reading itself is dropped too: picked as the minimum, it is likely a noise low.
+    # The code archive drops it from the final fit only, keeping it in the fits that choose the
+    # end; here it is out of both (changes only unstable traces, e.g. one rejected by eye in
+    # CarbonIMTA, 2026-11-10)
+    excl <- flag | seq_along(tt) <= early[which.min(conc[early])]
+  }
+  seg <- .first_linear_ch4(tt, conc, excl)
+  if (is.null(seg$fit)) {
+    out[c("total", "ch4_flag")] <- list(window_total, "no linear diffusion segment")
+    return(out)
+  }
+  d <- seg$fit[["slope"]]
+  from <- tt >= seg$fit[["start"]]
+  out$total <- if (opt$total_from == "segment" && sum(from) >= 20)
+    .total_ch4(tt[from], conc[from], opt$spar, opt$nknots_ratio) else window_total
+  ebul <- out$total - d
+  labels <- c("diffusion > total flux"[d > out$total],
+              "ebullition < diffusion + SE"[ebul < d + seg$fit[["se"]] && d <= out$total],
+              "no linear diffusion segment"[!seg$ok])
+  out$ch4_flag <- if (length(labels)) paste(labels, collapse = "; ") else "ok"
+  out$diffusion <- d
+  out$ebullition <- if (ebul >= 0 || opt$neg_ebullition == "keep") ebul else
+    if (opt$neg_ebullition == "zero") 0 else NA_real_
+  out
 }
 
 #' @title convert_ghg_unit
