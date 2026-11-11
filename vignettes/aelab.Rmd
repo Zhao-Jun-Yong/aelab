@@ -68,7 +68,7 @@ ref <- read_excel(ref_data_path)
 ref
 ```
 
-Now, we can perform regressions on the GHG concentrations using `calculate_regression()`. The data frame passed to its `reference_df` argument — here, `ref` — must contain a `date_time` column (measurement start times), a `site` column, and an `analyzer` column (e.g. `"1337"`).
+Now, we can perform regressions on the GHG concentrations using `calculate_regression()`. The data frame passed to its `reference_df` argument — here, `ref` — must contain a `date_time` column (measurement start times) and a `site` column; the argument names `reference_time = "date_time"` and `site = "site"` are the defaults. With `analyzer_code` (e.g. `"1337"`) only the rows whose `analyzer` column contains that text are used; the default `analyzer_code = NULL` uses all rows and needs no `analyzer` column.
 
 ### Window type
 
@@ -142,6 +142,19 @@ ref_direct <- data.frame(
 )
 calculate_regression(ch4, ref_direct, ghg = "CH4", reference_time = "date_time",
                      site = "site", analyzer_code = "1337")
+
+# The same with the defaults (all rows of ref_direct)
+calculate_regression(ch4, ref_direct, ghg = "CH4")
+```
+
+Each row gives the readings its fit used as `start_time` and `end_time` (date-times in Asia/Taipei), for example to average chamber temperature over the same window with `dplyr::between()`.
+
+To fit several gases, call the function once per gas and bind the rows:
+
+```{r}
+slopes <- purrr::map_dfr(c("CH4", "CO2"), \(g)
+  calculate_regression(ch4, ref_direct, ghg = g) |> dplyr::mutate(gas = g))
+slopes[, c("gas", "slope", "slope_unit", "flag")]
 ```
 
 ### Method 3: Using `make_reference()`
@@ -231,7 +244,7 @@ res[, c("slope", "slope_regression", "slope_diffusion", "slope_ebullition", "flu
 
 `ch4_flag` labels closures to look at by eye (for example `"ebullition < diffusion + SE"`, or `"diffusion after first bubble"` when the diffusion segment starts after a bubble); the labels never change the values. For closures with a bubble, `slope` is the total, while `r_square`, `correlation` and `flag` describe the linear diffusion fit (the R² and correlation tests are for a straight line, not for the two-point total). `review_needed` is `TRUE` for every closure whose `ch4_flag` is not `"ok"` or a `"no bubble"` label; what to do with those closures is left to you. Bubble detection needs `window_type = "fixed"` (the default).
 
-After looking at the closures with `review_needed = TRUE`, record one decision per closure (`accept`, `total` for total only, `not_bubble` to use the regression fit, `discard`) and apply them with `apply_ch4_review()`; closures still needing review are marked `"unreviewed"`:
+After looking at the closures with `review_needed = TRUE`, record one decision per closure (`accept`, `total` for total only, `not_bubble` to use the regression fit, `discard`) and apply them with `apply_ch4_review()`; closures still needing review are marked `"unreviewed"`, and `calculate_ghg_flux()` warns with their number (the flux is still calculated):
 
 ```{r}
 dec <- data.frame(site = "P1", reference_time = format(t0, "%Y-%m-%d %H:%M:%S"), decision = "accept")

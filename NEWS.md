@@ -1,5 +1,15 @@
 # aelab (development version)
 
+## Workflow
+
+* `calculate_regression()`: `reference_time` and `site` default to `"date_time"` and `"site"`, and
+  `analyzer_code` to `NULL` (all rows of `reference_df`; no `analyzer` column needed).
+* `start_time`, `end_time`, `diffusion_start`, `diffusion_end` and `total_start` are date-times in
+  Asia/Taipei (POSIXct; were text `"%Y/%m/%d %H:%M:%S"`). Values are unchanged.
+* `calculate_ghg_flux()` warns with a count when `review_needed` closures have no decision
+  (`ch4_decision` `"unreviewed"` or missing); the flux is still calculated.
+* The vignette shows several gases in one table with `purrr::map_dfr()`.
+
 ## `convert_ghg_unit()`
 
 * `ratio = TRUE` for N2O now divides by two N atoms (44.013 / 28.014 = 1.571; was 3.142, two times too
@@ -234,15 +244,11 @@
   measure (99% coverage) and plain front-size Bonferroni with no correlation discount (~79%) —
   before landing on a front-size exponent (`front_correlation = 0.3`) found by an empirical scan
   against the coverage test below, confirmed at 67.7% (203/300, `binom.test` p = 0.90) on the
-  test's full fixed-seed sample. **Caveat, not yet resolved**: that scan and confirmation draw
-  from the same idealized data-generating process (i.i.d. Gaussian noise, exactly linear trend) —
-  an advisor-panel review of this fix (2026-09-08; Statistician and Journal Reviewer takes, in
-  particular) flagged this as fitting-then-checking-on-the-same-target rather than independent
-  validation, and noted the correction has not been checked against autocorrelated residuals,
-  real chamber artifacts (ebullition, imperfect seals), or a non-linear true trend. See
-  `.pareto_winners_curse_correct()`'s source comment and `data-raw/calibrate_pareto_front_correlation.R`
-  for the full calibration record and open validation gap before trusting this on real closures
-  generally.
+  test's full fixed-seed sample. **Caveat**: that scan and confirmation draw
+  from the same idealized data-generating process (i.i.d. Gaussian noise, exactly linear trend),
+  so the correction has not been checked against autocorrelated residuals, real chamber artifacts
+  (ebullition, imperfect seals), or a non-linear true trend. See
+  `data-raw/calibrate_pareto_front_correlation.R` for the calibration.
 * `calculate_regression()` — fixed a `window_type = "pareto"` bug where the residual bootstrap
   used to estimate slope uncertainty could silently admit numerically degenerate refits for
   `fit_type = "auto"` candidates that resolved to `exp_tz`/`exp_zhao18`. Each bootstrap replicate

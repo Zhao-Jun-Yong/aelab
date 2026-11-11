@@ -5,12 +5,15 @@
 #' @title calculate_regression
 #' @description Calculate the slope of GHG concentration change over time using linear or exponential regression.
 #' @param data Data from the GHG analyzer that has been processed and time-converted.
-#' @param reference_df A data frame containing measurement reference times, site names, and an \code{analyzer} column.
+#' @param reference_df A data frame containing measurement reference times, site names, and (when
+#'   \code{analyzer_code} is given) an \code{analyzer} column.
 #' @param ghg Column name in \code{data} containing GHG concentration values (e.g., \code{"CH4"}, \code{"N2O"}).
 #' @param reference_time Column name in \code{reference_df} containing the measurement start times (POSIXct).
-#' @param site Column name in \code{reference_df} containing site identifiers.
+#'   Default \code{"date_time"}.
+#' @param site Column name in \code{reference_df} containing site identifiers. Default \code{"site"}.
 #' @param analyzer_code Text used to filter rows of \code{reference_df} by its \code{analyzer} column
 #'   (plain text, not a regular expression; case is ignored). A warning is given when no row matches.
+#'   Default \code{NULL}: all rows are used and \code{reference_df} needs no \code{analyzer} column.
 #' @param duration_minutes The duration of the measurement window in minutes. Default 7.
 #'   When \code{window_type = "fixed"} and \code{reference_df} contains a \code{duration_minutes}
 #'   column, the per-row value (if not \code{NA}) overrides this global parameter for that
@@ -196,7 +199,8 @@
 #'   candidate) for a fit; fewer gives \code{flag = "no_data"}. Default 60, goFlux's
 #'   \code{warn.length} (about 1 min at 1 Hz; Rheault et al. 2024, goFlux package documentation),
 #'   where goFlux only warns. A fit also needs more readings than the model has parameters.
-#' @return A tibble with columns: \code{start_time}, \code{end_time}, \code{n_obs} (readings in the
+#' @return A tibble with columns: \code{start_time}, \code{end_time} (date-times in Asia/Taipei of the
+#'   first and last reading in the fitted window), \code{n_obs} (readings in the
 #'   fitted window; for \code{"fixed"}, all readings in the window, also when below \code{min_obs}),
 #'   \code{h2o_start} (first \code{H2O} reading of the closure, ppm; \code{NA} without an \code{H2O}
 #'   column; for \code{calculate_ghg_flux(h2o = "h2o_start")}), \code{slope} (per second, in the unit of the
@@ -228,8 +232,8 @@
 #'   which then gets the label \code{"ebullition < diffusion + SE"}), \code{diffusion_r1} (lag-1 autocorrelation of the diffusion-line
 #'   residuals), \code{n_obs_diffusion} (readings in the diffusion segment;
 #'   \code{n_obs} without a bubble), \code{slope_ebullition} (unit of \code{ghg} per second),
-#'   \code{diffusion_start}, \code{diffusion_end} (the diffusion segment; the window without a
-#'   bubble), \code{total_start}, \code{total_start_conc}, \code{total_end_conc} (start time and
+#'   \code{diffusion_start}, \code{diffusion_end} (date-times of the diffusion segment; the window
+#'   without a bubble), \code{total_start}, \code{total_start_conc}, \code{total_end_conc} (start time and
 #'   the two end points of the two-point total, which runs to the last reading; \code{NA} without
 #'   a bubble), \code{bubble_spans} (flagged readings as seconds from the first reading of the
 #'   window, e.g. \code{"26-31; 227-282"}; \code{NA} without a bubble; drawn by
@@ -330,7 +334,7 @@
 #' @export
 
 calculate_regression <- function(data, reference_df, ghg,
-                                 reference_time, site, analyzer_code,
+                                 reference_time = "date_time", site = "site", analyzer_code = NULL,
                                  duration_minutes = 7, num_rows = 300,
                                  fit_type = "linear", t_zero = 0,
                                  window_type = "fixed", start_offset_s = 0,
@@ -352,7 +356,8 @@ calculate_regression <- function(data, reference_df, ghg,
 
   reference_time_vec <- lubridate::force_tz(reference_df[[reference_time]], tzone = "Asia/Taipei")
   reference_site     <- as.character(reference_df[[site]])
-  reference_analyzer <- as.character(reference_df$analyzer)
+  reference_analyzer <- if ("analyzer" %in% names(reference_df)) as.character(reference_df$analyzer) else
+    rep(NA_character_, nrow(reference_df))
   duration_minutes_vec <- if ("duration_minutes" %in% names(reference_df)) {
     as.numeric(reference_df$duration_minutes)
   } else {
@@ -434,8 +439,8 @@ calculate_regression <- function(data, reference_df, ghg,
     }
 
     out <- tibble(
-      start_time           = format(fit$start_dt, "%Y/%m/%d %H:%M:%S"),
-      end_time             = format(fit$end_dt, "%Y/%m/%d %H:%M:%S"),
+      start_time           = .taipei_time(fit$start_dt),
+      end_time             = .taipei_time(fit$end_dt),
       n_obs                = fit$n_obs,
       h2o_start            = cl$h2o_start,
       slope                = fit$slope,
@@ -465,9 +470,9 @@ calculate_regression <- function(data, reference_df, ghg,
         diffusion_r1 = split$diff_r1,
         n_obs_diffusion = if (startsWith(split$ch4_flag, "no bubble")) fit$n_obs else split$diff_n,
         slope_ebullition = split$ebullition,
-        diffusion_start = format(as.POSIXct(split$diff_start, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
-        diffusion_end = format(as.POSIXct(split$diff_end, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
-        total_start = format(as.POSIXct(split$total_t0, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
+        diffusion_start = .taipei_time(split$diff_start),
+        diffusion_end = .taipei_time(split$diff_end),
+        total_start = .taipei_time(split$total_t0),
         total_start_conc = split$total_c0, total_end_conc = split$total_c1,
         bubble_spans = split$bubble_spans, n_bubbles = split$n_bubbles, ch4_flag = split$ch4_flag,
         review_needed = !split$ch4_flag %in% c("ok", "no bubble", "no bubble: rises <= min_rise")))
@@ -483,6 +488,9 @@ calculate_regression <- function(data, reference_df, ghg,
 }
 
 # --- helpers of calculate_regression() ---------------------------------------------------------
+
+# Date-time in Asia/Taipei from a POSIXct or epoch seconds (NA stays NA)
+.taipei_time <- function(x) as.POSIXct(as.numeric(x), origin = "1970-01-01", tz = "Asia/Taipei")
 
 # Argument checks that need no per-closure data. Returns the validated CH4 options, the readings a
 # fit needs, and `reference_df` restricted to the rows of `analyzer_code`.
@@ -505,14 +513,15 @@ calculate_regression <- function(data, reference_df, ghg,
   if (!ghg %in% names(data))
     stop("`data` has no column \"", ghg, "\"",
          if (toupper(ghg) %in% names(data)) paste0("; did you mean \"", toupper(ghg), "\"?") else ".")
-  miss <- setdiff(c(reference_time, site, "analyzer"), names(reference_df))
+  miss <- setdiff(c(reference_time, site, if (!is.null(analyzer_code)) "analyzer"), names(reference_df))
   if (length(miss)) stop("`reference_df` has no column(s): ", paste(miss, collapse = ", "), ".")
   if (!inherits(reference_df[[reference_time]], "POSIXct"))
     stop("`reference_df$", reference_time, "` must be date-times (POSIXct), e.g. from lubridate::ymd_hms().")
   # plain text, not a regex: "1337+1098" must match itself
-  keep <- stringr::str_detect(as.character(reference_df$analyzer),
-                              stringr::fixed(analyzer_code, ignore_case = TRUE)) %in% TRUE
-  if (!any(keep)) warning("No `reference_df$analyzer` contains \"", analyzer_code, "\": no rows returned.",
+  keep <- if (is.null(analyzer_code)) rep(TRUE, nrow(reference_df)) else
+    stringr::str_detect(as.character(reference_df$analyzer),
+                        stringr::fixed(analyzer_code, ignore_case = TRUE)) %in% TRUE
+  if (!is.null(analyzer_code) && !any(keep)) warning("No `reference_df$analyzer` contains \"", analyzer_code, "\": no rows returned.",
                           call. = FALSE)
   list(ch4_opt = ch4_opt, need = need, reference_df = reference_df[keep, , drop = FALSE])
 }

@@ -109,3 +109,47 @@ test_that("real closure B3: false bubbles in noise are labelled for review", {
   expect_match(r$ch4_flag, "diffusion > total flux")
   expect_match(r$ch4_flag, "diffusion after first bubble")
 })
+
+test_that("calculate_regression defaults, analyzer_code = NULL and date-time window columns", {
+  d <- utils::read.csv(test_file("ch4_bubbles.csv"), stringsAsFactors = FALSE)
+  d$date_time <- as.POSIXct(d$date_time, tz = "Asia/Taipei")
+  d <- d[d$closure == "B1", ]
+  ref <- data.frame(site = "B1", date_time = as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei"))  # no analyzer
+  r <- suppressWarnings(calculate_regression(d, ref, ghg = "CH4", start_offset_s = 30,
+                                             duration_minutes = 5))
+  expect_equal(nrow(r), 1)
+  expect_true(is.na(r$analyzer))
+  for (col in c("start_time", "end_time")) {
+    expect_s3_class(r[[col]], "POSIXct")
+    expect_equal(attr(r[[col]], "tzone"), "Asia/Taipei")
+  }
+  expect_equal(format(r$start_time, "%H:%M:%S"), "08:00:30")
+  # an analyzer column is still used when analyzer_code is given
+  ref$analyzer <- "x"
+  expect_warning(calculate_regression(d, ref, ghg = "CH4", analyzer_code = "nomatch"), "No `reference_df")
+  expect_error(calculate_regression(d, ref[, c("site", "analyzer")], ghg = "CH4"), "date_time")
+})
+
+test_that("bubble closure time columns are date-times and no_data rows give NA times", {
+  r <- bubble_closure("B1")
+  for (col in c("start_time", "end_time", "diffusion_start", "diffusion_end", "total_start"))
+    expect_s3_class(r[[col]], "POSIXct")
+  expect_true(r$diffusion_start >= r$start_time && r$diffusion_end <= r$end_time)
+  none <- suppressWarnings(calculate_regression(
+    data.frame(date_time = as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei") + 0:5, CH4 = 1:6),
+    data.frame(site = "s", date_time = as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")), ghg = "CH4"))
+  expect_equal(none$flag, "no_data")
+  expect_true(is.na(none$start_time) && inherits(none$start_time, "POSIXct"))
+})
+
+test_that("calculate_ghg_flux warns about review_needed closures without a decision", {
+  d <- data.frame(slope = c(1, 2, 3), area = 1, volume = 1, temp = 20,
+                  review_needed = c(TRUE, TRUE, FALSE))
+  expect_warning(res <- calculate_ghg_flux(d), "2 closure\\(s\\) have review_needed")
+  expect_equal(nrow(res), 3)  # still calculated
+  d$ch4_decision <- c("accept", "unreviewed", "auto")
+  expect_warning(calculate_ghg_flux(d), "1 closure")
+  d$ch4_decision[2] <- "total"
+  expect_no_warning(calculate_ghg_flux(d))
+  expect_no_warning(calculate_ghg_flux(d[, setdiff(names(d), "review_needed")]))
+})

@@ -8,9 +8,9 @@ calculate_regression(
   data,
   reference_df,
   ghg,
-  reference_time,
-  site,
-  analyzer_code,
+  reference_time = "date_time",
+  site = "site",
+  analyzer_code = NULL,
   duration_minutes = 7,
   num_rows = 300,
   fit_type = "linear",
@@ -36,16 +36,19 @@ calculate_regression(
 \arguments{
 \item{data}{Data from the GHG analyzer that has been processed and time-converted.}
 
-\item{reference_df}{A data frame containing measurement reference times, site names, and an \code{analyzer} column.}
+\item{reference_df}{A data frame containing measurement reference times, site names, and (when
+\code{analyzer_code} is given) an \code{analyzer} column.}
 
 \item{ghg}{Column name in \code{data} containing GHG concentration values (e.g., \code{"CH4"}, \code{"N2O"}).}
 
-\item{reference_time}{Column name in \code{reference_df} containing the measurement start times (POSIXct).}
+\item{reference_time}{Column name in \code{reference_df} containing the measurement start times (POSIXct).
+Default \code{"date_time"}.}
 
-\item{site}{Column name in \code{reference_df} containing site identifiers.}
+\item{site}{Column name in \code{reference_df} containing site identifiers. Default \code{"site"}.}
 
 \item{analyzer_code}{Text used to filter rows of \code{reference_df} by its \code{analyzer} column
-(plain text, not a regular expression; case is ignored). A warning is given when no row matches.}
+(plain text, not a regular expression; case is ignored). A warning is given when no row matches.
+Default \code{NULL}: all rows are used and \code{reference_df} needs no \code{analyzer} column.}
 
 \item{duration_minutes}{The duration of the measurement window in minutes. Default 7.
 When \code{window_type = "fixed"} and \code{reference_df} contains a \code{duration_minutes}
@@ -250,7 +253,8 @@ candidate) for a fit; fewer gives \code{flag = "no_data"}. Default 60, goFlux's
 where goFlux only warns. A fit also needs more readings than the model has parameters.}
 }
 \value{
-A tibble with columns: \code{start_time}, \code{end_time}, \code{n_obs} (readings in the
+A tibble with columns: \code{start_time}, \code{end_time} (date-times in Asia/Taipei of the
+  first and last reading in the fitted window), \code{n_obs} (readings in the
   fitted window; for \code{"fixed"}, all readings in the window, also when below \code{min_obs}),
   \code{h2o_start} (first \code{H2O} reading of the closure, ppm; \code{NA} without an \code{H2O}
   column; for \code{calculate_ghg_flux(h2o = "h2o_start")}), \code{slope} (per second, in the unit of the
@@ -282,8 +286,8 @@ A tibble with columns: \code{start_time}, \code{end_time}, \code{n_obs} (reading
   which then gets the label \code{"ebullition < diffusion + SE"}), \code{diffusion_r1} (lag-1 autocorrelation of the diffusion-line
   residuals), \code{n_obs_diffusion} (readings in the diffusion segment;
   \code{n_obs} without a bubble), \code{slope_ebullition} (unit of \code{ghg} per second),
-  \code{diffusion_start}, \code{diffusion_end} (the diffusion segment; the window without a
-  bubble), \code{total_start}, \code{total_start_conc}, \code{total_end_conc} (start time and
+  \code{diffusion_start}, \code{diffusion_end} (date-times of the diffusion segment; the window
+  without a bubble), \code{total_start}, \code{total_start_conc}, \code{total_end_conc} (start time and
   the two end points of the two-point total, which runs to the last reading; \code{NA} without
   a bubble), \code{bubble_spans} (flagged readings as seconds from the first reading of the
   window, e.g. \code{"26-31; 227-282"}; \code{NA} without a bubble; drawn by

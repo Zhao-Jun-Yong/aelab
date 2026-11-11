@@ -540,8 +540,8 @@ test_quiet("bubble_detection guards, new columns, plot and option checks", {
                                     bubble_detection = TRUE), "fixed")
 
   r <- ch4_split(trace)
-  expect_equal(r$diffusion_start, "2024/01/01 08:00:01")  # trim_to_min drops the first reading
-  expect_true(r$diffusion_end < "2024/01/01 08:01:40")
+  expect_equal(format(r$diffusion_start, "%Y/%m/%d %H:%M:%S"), "2024/01/01 08:00:01")  # trim_to_min drops the first reading
+  expect_true(r$diffusion_end < as.POSIXct("2024-01-01 08:01:40", tz = "Asia/Taipei"))
   expect_gt(r$slope_diffusion_se, 0)
   expect_true(is.na(r$g_factor))
   f <- calculate_ghg_flux(cbind(r, area = 1, volume = 1, temp = 25))
@@ -775,7 +775,7 @@ test_quiet("per-row duration_minutes overrides global parameter", {
   expect_equal(result$flag, "ok")
   expect_true(!is.na(result$end_time))
   # Window should end at 10:01:00, not 10:07:00
-  expect_true(grepl("10:01:00", result$end_time))
+  expect_true(grepl("10:01:00", format(result$end_time)))
 })
 
 test_that(".pareto_front_select picks the front member closest to the ideal corner", {
@@ -1125,7 +1125,7 @@ test_quiet("per-row start_offset_s overrides global parameter", {
                                  duration_minutes = 1, start_offset_s = 0)
   expect_equal(result$flag, "ok")
   # Window should start at 10:01:00, not 10:00:00
-  expect_true(grepl("10:01:00", result$start_time))
+  expect_true(grepl("10:01:00", format(result$start_time)))
 })
 
 # ---------------------------------------------------------------------------------------------

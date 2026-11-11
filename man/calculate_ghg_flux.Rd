@@ -54,6 +54,12 @@ moles of dry air, V P (1 - H2O) / (R T A), as goFlux's \code{flux.term()} (Rheau
 \description{
 Calculate the greenhouse gas (GHG) flux based on input parameters from a data frame.
 }
+\details{
+When \code{data} has \code{review_needed} (from \code{calculate_regression(bubble_detection = TRUE)})
+  and some of those rows have no decision (\code{ch4_decision} is \code{"unreviewed"} or missing, see
+  \code{\link{apply_ch4_review}}), a warning gives their number; the flux is still calculated for them
+  from the unreviewed split.
+}
 \examples{
 data <- data.frame(
   slope = c(1.2, 1.5, 1.1),

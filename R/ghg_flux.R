@@ -18,6 +18,10 @@
 #'   \code{calculate_regression()}. \code{NULL} (default) treats the air as dry. The flux uses the
 #'   moles of dry air, V P (1 - H2O) / (R T A), as goFlux's \code{flux.term()} (Rheault et al.
 #'   2024), because LI-7810/7820 report dry mole fractions (LI-COR output tables).
+#' @details When \code{data} has \code{review_needed} (from \code{calculate_regression(bubble_detection = TRUE)})
+#'   and some of those rows have no decision (\code{ch4_decision} is \code{"unreviewed"} or missing, see
+#'   \code{\link{apply_ch4_review}}), a warning gives their number; the flux is still calculated for them
+#'   from the unreviewed split.
 #' @return \code{data} with \code{flux} and \code{unit} added. When \code{data} has
 #'   \code{slope_diffusion} and \code{slope_ebullition} (from
 #'   \code{calculate_regression(bubble_detection = TRUE)}), \code{flux_diffusion} and
@@ -63,6 +67,14 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   required_cols <- c(slope, area, volume, temp, pressure, h2o)
   if (!all(required_cols %in% names(data))) {
     stop("One or more specified columns do not exist in the data frame.")
+  }
+
+  if ("review_needed" %in% names(data)) {
+    dec <- if ("ch4_decision" %in% names(data)) data$ch4_decision else rep(NA_character_, nrow(data))
+    n_open <- sum(data$review_needed %in% TRUE & (is.na(dec) | dec == "unreviewed"))
+    if (n_open > 0)
+      warning(n_open, " closure(s) have review_needed = TRUE and no decision (see apply_ch4_review()); ",
+              "their flux uses the unreviewed CH4 split.", call. = FALSE)
   }
 
   # Extract values from the data frame

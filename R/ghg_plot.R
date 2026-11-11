@@ -64,7 +64,9 @@ plot_ghg_flux <- function(data, regression_result, ghg,
     u <- unique(stats::na.omit(u))
     if (length(u) == 1) paste0(g, " (", u, ")") else g
   }
-  as_time <- function(x) as.POSIXct(x, format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
+  # POSIXct from calculate_regression(); text "%Y/%m/%d %H:%M:%S" from older saved results
+  as_time <- function(x) if (inherits(x, "POSIXct")) x else
+    as.POSIXct(x, format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
   num <- function(x, d = 3) if (is.na(x)) "NA" else trimws(formatC(x, digits = d, format = "g"))
 
   # bubble closures from calculate_regression(bubble_detection = TRUE): the diffusion line is drawn
