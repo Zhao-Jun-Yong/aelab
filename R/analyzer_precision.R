@@ -1,6 +1,6 @@
 #' Instrument precision for supported trace gas analyzers
 #'
-#' 1-second (1σ) precision values, one row per gas. \code{\link{tidy_ghg_analyzer}} copies them
+#' 1-second (\eqn{1\sigma}{1 sigma}) precision values, one row per gas. \code{\link{tidy_ghg_analyzer}} copies them
 #' into \code{<gas>_prec} columns for LI-COR data, which \code{\link{calculate_regression}} uses
 #' for \code{fit_type = "auto"} (kappamax) and \code{window_type = "pareto"}.
 #'
@@ -8,7 +8,7 @@
 #' \describe{
 #'   \item{model}{Analyzer model name (character).}
 #'   \item{gas}{Gas measured: \code{"CH4"}, \code{"CO2"}, or \code{"N2O"} (character).}
-#'   \item{precision}{Instrument precision (1σ, 1 s averaging) in \code{unit} (numeric).}
+#'   \item{precision}{Instrument precision (\eqn{1\sigma}{1 sigma}, 1 s averaging) in \code{unit} (numeric).}
 #'   \item{unit}{Unit the analyzer reports for that gas, so \code{precision} matches the data
 #'     from \code{\link{tidy_ghg_analyzer}} (\code{"ppb"} for LI-COR CH4 and N2O, otherwise
 #'     \code{"ppm"}) (character).}

@@ -1,4 +1,4 @@
-# aelab (development version)
+# aelab 1.2.0
 
 ## Workflow
 
