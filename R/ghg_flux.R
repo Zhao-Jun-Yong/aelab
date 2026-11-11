@@ -535,54 +535,9 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   }, logical(1))
 }
 
-# Winner's-curse correction for the selected pareto candidate's slope-uncertainty interval.
-# INSPIRED BY, but not an implementation of, Zrnic & Fithian (2025) Sec 4 "effective Bonferroni"
-# (see Efforts/Academic/summary_Zrnic2025Flexible in the author's vault) - their actual
-# construction is a step-down algorithm restricted by each candidate's estimated suboptimality
-# gap, with a formal coverage guarantee, and their stated advantage over alternatives is needing
-# no tuning parameter. What's implemented here is a much cruder heuristic (front membership raised
-# to an empirically-fit power, see front_correlation below) that borrows the general idea - don't
-# protect the full candidate set, only genuine near-winners - without that guarantee. Flagged by
-# this package's own advisor-panel review (2026-09-08) as a citation that should read as
-# inspiration, not lineage; recorded here rather than reimplementing their actual step-down
-# construction, which remains a real option if this heuristic doesn't hold up under more scrutiny
-# (see the caveats below and in data-raw/calibrate_pareto_front_correlation.R).
-#
-# The Pareto front selects on (uncertainty width, fit quality) - not on the slope estimate itself
-# - so competitiveness has to be measured on *that* axis: two windows of very different length
-# routinely land on nearly the same slope estimate on genuinely linear data while differing
-# enormously in precision, so a first version of this correction that measured competitiveness via
-# slope-value proximity treated almost every candidate as a "near-tie" and wildly over-widened the
-# interval (99% empirical coverage against a 68% target, caught by the ground-truth coverage test
-# below - see git history). Non-dominated (Pareto-front) candidates are exactly the ones that were
-# genuine contenders for selection, so front size is the starting point for "how many candidates
-# could plausibly have won instead" - but see front_correlation immediately below: it is NOT used
-# as a parameter-free count on its own, because plain Bonferroni over the raw front size
-# (front_correlation = 1) still overcorrected (~79% empirical coverage): front members come from
-# *overlapping* windows of the same underlying data, so they are highly positively correlated, not
-# independent, and Bonferroni's union bound is only tight for independent tests (the effect the
-# "effective number of independent tests" literature for correlated multiple testing addresses,
-# e.g. Li & Ji 2005 - cited for the general idea, not as the source of this specific formula).
-# front_correlation discounts the raw front size toward that correlation. The correction is
-# referenced to the *winner's own* bootstrap SE (not each candidate's own, which would let a
-# single wide/imprecise front member's own noise dominate the shared radius, reproducing the same
-# over-widening failure), and reduces to the unmodified interval exactly when the front has only
-# one member (the winner stands alone).
-#
-# CAVEAT (do not treat 0.3 as a validated constant): it was found by a small empirical scan
-# against the ground-truth coverage test below - see data-raw/calibrate_pareto_front_correlation.R
-# for the full scan and results - then "confirmed" on that same test's larger fixed-seed sample.
-# Both draws come from the identical idealized data-generating process (i.i.d. Gaussian noise
-# around an exactly linear trend); this is fitting-then-checking-on-the-same-target, not
-# independent validation, and the advisor-panel review above (Statistician, Journal Reviewer
-# takes) named this explicitly. 0.3 is not derived analytically, is specific to this function's
-# own default grid density (min_deadband/max_deadband/deadband_step, min_window_size/cutoff_step -
-# a much coarser or finer grid would change how correlated adjacent candidates are and may need
-# recalibration), and has never been checked against a data-generating process with autocorrelated
-# residuals, real chamber-closure artifacts (ebullition, imperfect seals), or a non-linear true
-# trend - all flagged by the panel as untested territory this synthetic test cannot reach. Treat
-# `window_type = "pareto"`'s reported coverage as validated for linear-trend/i.i.d.-Gaussian
-# conditions, not yet for real field closures generally.
+# Widens the selected candidate's interval by the number of front members ^ front_correlation
+# (heuristic; front_correlation = 0.3 is fixed, no published source, fitted in
+# data-raw/calibrate_pareto_front_correlation.R); unchanged when the front has one member.
 .pareto_winners_curse_correct <- function(candidates, sel_idx, uw, nf, conf = 0.68,
                                           front_correlation = 0.3) {
   m_eff <- sum(!.pareto_dominance(.pareto_normalize(uw), .pareto_normalize(nf))) ^ front_correlation
@@ -1782,6 +1737,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 # Bubble detection of Minaudo et al. (2026, p. 4): logical flag per reading; t in seconds from 0.
 # Run on readings linearly interpolated to a 1 s grid, as the code archive (find_bubbles.R,
 # lines 35-36), so window, merge_gap and min_len are seconds whatever the logging interval or gaps.
+# min_thresh = 1e-4 (floor of the variance cut-off) is fixed, no published source.
 .find_ch4_bubbles <- function(t, conc, window = 10, align = "centre", prob = 0.75, min_thresh = 1e-4,
                               merge_gap = 10, min_len = 5) {
   grid <- seq(0, floor(max(t)))
@@ -1832,6 +1788,8 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 # first long-enough run (ok = FALSE); fit = NULL when no run is long enough.
 # The code archive's 100 s moving-window rising-slope check is not used: with trim_to_min on it
 # changed no diffusion value (> 1%) in 97 bubbly CarbonIMTA closures (2026-11-10).
+# Fixed, no published source: adj. R2 >= 0.7 and p < 0.05 (pass below); gap_s = 10 is the
+# "< 10 s apart" block rule described above.
 .first_linear_ch4 <- function(t, conc, flag, min_s = 20, gap_s = 10, t_bubble = Inf) {
   r <- rle(!flag)
   ends <- cumsum(r$lengths)
@@ -1860,6 +1818,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 }
 
 # Two-point total from the smoothed series (Minaudo et al. 2026, p. 3, Eq. 1)
+# edge_s = 30 (width of the first and last stretch searched for c0 and c1) is fixed, no published source.
 .total_ch4 <- function(tt, conc, spar, nknots_ratio, edge_s = 30) {
   tt <- tt - tt[1]
   sm <- stats::predict(stats::smooth.spline(tt, conc, nknots = round(nknots_ratio * length(tt)),
@@ -1886,7 +1845,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   time <- time[o]; conc <- conc[o]
   keep <- !duplicated(time)
   time <- time[keep]; conc <- conc[keep]
-  if (length(time) < 20) return(out)
+  if (length(time) < 20) return(out)  # fixed, no published source
   tt <- time - time[1]
 
   flag <- .find_ch4_bubbles(tt, conc, opt$bubble_window, opt$bubble_align, opt$bubble_prob,
@@ -1932,6 +1891,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   out$bubble_spans <- spans(flag)
 
   excl <- flag
+  # the lowest reading is searched in the first half of the closure: fixed, no published source
   if (isTRUE(opt$trim_to_min) && any(!flag & tt < max(tt) / 2)) {
     early <- which(!flag & tt < max(tt) / 2)
     # the lowest reading itself is dropped too: picked as the minimum, it is likely a noise low.
@@ -1947,7 +1907,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   }
   d <- seg$fit[["slope"]]
   from <- tt >= seg$fit[["start"]]
-  if (opt$total_from == "segment" && sum(from) >= 20) {
+  if (opt$total_from == "segment" && sum(from) >= 20) {  # 20 readings: fixed, no published source
     tot <- .total_ch4(tt[from], conc[from], opt$spar, opt$nknots_ratio)
     out$total <- tot[["slope"]]
     out[c("total_t0", "total_c0", "total_c1")] <- list(time[from][1], tot[["c0"]], tot[["c1"]])
