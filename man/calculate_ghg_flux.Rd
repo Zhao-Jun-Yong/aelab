@@ -10,7 +10,9 @@ calculate_ghg_flux(
   area = "area",
   volume = "volume",
   temp = "temp",
-  conc_unit = c("ppm", "ppb")
+  conc_unit = c("ppm", "ppb"),
+  pressure = NULL,
+  h2o = NULL
 )
 }
 \arguments{
@@ -31,13 +33,22 @@ are divided by 1000 so the flux stays in mmol m-2 h-1. When \code{data} has a
 \code{slope_unit} column (from \code{calculate_regression()} on \code{tidy_ghg_analyzer()}
 data), it is used for each row and \code{conc_unit} only fills rows where it is \code{NA};
 a \code{conc_unit} given explicitly that contradicts it is an error.}
+
+\item{pressure}{Optional name of a column with air pressure (kPa). \code{NULL} (default) uses
+101.325 kPa (1 atm).}
+
+\item{h2o}{Optional name of a column with water vapour (ppm), e.g. \code{h2o_start} from
+\code{calculate_regression()}. \code{NULL} (default) treats the air as dry. The flux uses the
+moles of dry air, V P (1 - H2O) / (R T A), as goFlux's \code{flux.term()} (Rheault et al.
+2024), because LI-7810/7820 report dry mole fractions (LI-COR output tables).}
 }
 \value{
 \code{data} with \code{flux} and \code{unit} added. When \code{data} has
   \code{slope_diffusion} and \code{slope_ebullition} (from
   \code{calculate_regression(bubble_detection = TRUE)}), \code{flux_diffusion} and
   \code{flux_ebullition} are added too (and \code{flux_diffusion_se} from
-  \code{slope_diffusion_se}); \code{flux} is then the total CH4 flux, because
+  \code{slope_diffusion_se});
+  \code{flux} is then the total CH4 flux, because
   \code{slope} holds the total slope for closures with a bubble.
 }
 \description{

@@ -13,9 +13,12 @@ utils::globalVariables(c("CO2", "CH4", "N2O", "conc", "analyzer_precision"))
 #' @param hr Hour offset to correct the analyzer timestamp.
 #' @param min Minute offset to correct the analyzer timestamp.
 #' @param sec Second offset to correct the analyzer timestamp.
-#' @return Return the loaded XLSX file after tidying, with one \code{<gas>_unit} column per gas
-#'   (\code{CO2_unit}, \code{CH4_unit}, \code{N2O_unit}: \code{"ppm"} or \code{"ppb"}), which
-#'   \code{calculate_regression()} turns into \code{slope_unit}. If any time offset is non-zero, a
+#' @return Return the loaded XLSX file after tidying (for LI-COR also \code{H2O}, ppm), with one
+#'   \code{<gas>_unit} column per gas (\code{CO2_unit}, \code{CH4_unit}, \code{N2O_unit},
+#'   \code{H2O_unit}: \code{"ppm"} or \code{"ppb"}), which
+#'   \code{calculate_regression()} turns into \code{slope_unit}, and for LI-COR data one
+#'   \code{<gas>_prec} column per gas (1 s precision from \code{\link{analyzer_precision}}, same
+#'   unit), used by \code{fit_type = "auto"} and \code{window_type = "pareto"}. If any time offset is non-zero, a
 #'   \code{real_datetime} column is added via \code{\link{convert_time}}.
 #' @examples
 #' ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab")
@@ -26,6 +29,11 @@ utils::globalVariables(c("CO2", "CH4", "N2O", "conc", "analyzer_precision"))
 tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
                                day = 0, hr = 0, min = 0, sec = 0) {
 
+  supported <- list(licor = c("ch4", "n2o"), lgr = "ch4")
+  if (!isTRUE(analyzer %in% names(supported)) || !isTRUE(gas %in% supported[[analyzer]]))
+    stop("Unsupported analyzer/gas: \"", analyzer, "\"/\"", gas, "\". Use licor with \"ch4\" or \"n2o\", ",
+         "or lgr with \"ch4\".")
+
   # Import data from the specified Excel file
   data <- readxl::read_excel(file_path)
 
@@ -33,23 +41,25 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
   if(analyzer == "licor") {
     if (gas == "ch4") {
       # Extract column titles for CH4 data
-      title <- data[5, c(7:8, 10:11)]
-      # Remove unnecessary rows and keep relevant columns
-      data <- data[-c(1:6), c(7:8, 10:11)]
+      title <- data[5, 7:11]
+      # Remove unnecessary rows and keep relevant columns (DATE, TIME, H2O, CO2, CH4)
+      data <- data[-c(1:6), 7:11]
       colnames(data) <- title  # Set new column names
       data <- as.data.frame(data)  # Convert to data frame
       data$CH4 <- as.numeric(data$CH4)  # Convert CH4 to numeric
       data$CO2 <- as.numeric(data$CO2)  # Convert CO2 to numeric
+      data$H2O <- as.numeric(data$H2O)
       # Filter out rows with NaN values in CH4 and CO2
       data <- dplyr::filter(data, CH4 != "NaN", CO2 != "NaN")
     } else if (gas == "n2o") {
       # Extract column titles for N2O data
-      title <- data[5, c(7:8, 10)]
-      # Remove unnecessary rows and keep relevant columns
-      data <- data[-c(1:6), c(7:8, 10)]
+      title <- data[5, 7:10]
+      # Remove unnecessary rows and keep relevant columns (DATE, TIME, H2O, N2O)
+      data <- data[-c(1:6), 7:10]
       colnames(data) <- title  # Set new column names
       data <- as.data.frame(data)  # Convert to data frame
       data$N2O <- as.numeric(data$N2O)  # Convert N2O to numeric
+      data$H2O <- as.numeric(data$H2O)
       # Filter out rows with NaN values in N2O
       data <- dplyr::filter(data, N2O != "NaN")
     }
@@ -80,8 +90,11 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
   }
 
   # concentration unit per gas, carried by calculate_regression() into slope_unit
-  units <- if (analyzer == "licor") c(CO2 = "ppm", CH4 = "ppb", N2O = "ppb") else c(CO2 = "ppm", CH4 = "ppm")
+  units <- if (analyzer == "licor") c(CO2 = "ppm", CH4 = "ppb", N2O = "ppb", H2O = "ppm") else c(CO2 = "ppm", CH4 = "ppm")
   for (g in intersect(names(units), names(data))) data[[paste0(g, "_unit")]] <- units[[g]]
+  # 1 s precision per gas, as goFlux's import functions add <gas>_prec (LI-COR only for now)
+  if (analyzer == "licor") for (g in intersect(analyzer_precision$gas, names(data)))
+    data[[paste0(g, "_prec")]] <- analyzer_precision$precision[analyzer_precision$gas == g]
 
   # Apply timestamp correction if any offset is provided
   if (day != 0 || hr != 0 || min != 0 || sec != 0) {
@@ -353,7 +366,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 .pareto_select_window <- function(sorted_data, ghg, reference_datetime,
                                   fit_type, t_zero, kappamax, instrument_precision,
                                   min_deadband, max_deadband, deadband_step,
-                                  min_window_size, cutoff_step, n_boot) {
+                                  min_window_size, cutoff_step, n_boot, min_obs = 4) {
 
   no_grid       <- list(status = "no_grid",       n_candidates = 0L, selected = NULL)
   no_candidates <- list(status = "no_candidates", n_candidates = 0L, selected = NULL)
@@ -384,7 +397,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
       # with fit_type resolving to "quadratic" (3 fitted parameters) - a 0-residual-df perfect
       # fit by construction whose near-zero residuals could pull the min-max-normalized Pareto
       # selection toward it for purely arithmetic, not evidential, reasons.
-      if (sum(rows) < 4) next  # too few points to fit any of the supported model families
+      if (sum(rows) < max(4, min_obs)) next  # too few points to fit any of the supported model families
 
       cand_elapsed <- elapsed_full[rows] - db
       cand_conc    <- as.numeric(sorted_data[[ghg]][rows])
@@ -578,7 +591,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #' @param ghg Column name in \code{data} containing GHG concentration values (e.g., \code{"CH4"}, \code{"N2O"}).
 #' @param reference_time Column name in \code{reference_df} containing the measurement start times (POSIXct).
 #' @param site Column name in \code{reference_df} containing site identifiers.
-#' @param analyzer_code String pattern used to filter results by the \code{analyzer} column of \code{reference_df}.
+#' @param analyzer_code Text used to filter rows of \code{reference_df} by its \code{analyzer} column
+#'   (plain text, not a regular expression; case is ignored). A warning is given when no row matches.
 #' @param duration_minutes The duration of the measurement window in minutes. Default 7.
 #'   When \code{window_type = "fixed"} and \code{reference_df} contains a \code{duration_minutes}
 #'   column, the per-row value (if not \code{NA}) overrides this global parameter for that
@@ -593,8 +607,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a
 #'   quadratic only when it levels off rather than accelerates (Levy et al. 2011), and exp_tz only
 #'   when it levels off and its curvature parameter does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
-#'   \code{instrument_precision = NULL}, precision is looked up from \code{\link{analyzer_precision}}
-#'   by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.
+#'   \code{instrument_precision = NULL}, precision is taken from the \code{<ghg>_prec} column that
+#'   \code{\link{tidy_ghg_analyzer}} adds (an error without it). The model chosen for each measurement is recorded in the \code{fit_used} output column.
 #'   The exponential models and their slope formulas follow fluxible (Gaudard et al. 2025); the curvature
 #'   \code{b} is found by a one-dimensional search, with \code{Cm} and \code{a} solved by least squares for
 #'   each \code{b}. \code{"exp_tz"} fits the initial concentration \code{C0} as well (Kutzbach et al.
@@ -760,7 +774,14 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'       code archive's \code{length.min}); FluxSeparator needs more than 50 readings (Sø et al.
 #'       2024, p. 8).}
 #'   }
-#' @return A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (per second, in the unit of the
+#' @param min_obs Fewest readings in a window (fixed, each sliding window, each pareto
+#'   candidate) for a fit; fewer gives \code{flag = "no_data"}. Default 60, goFlux's
+#'   \code{warn.length} (about 1 min at 1 Hz; Rheault et al. 2024, goFlux package documentation),
+#'   where goFlux only warns. A fit also needs more readings than the model has parameters.
+#' @return A tibble with columns: \code{start_time}, \code{end_time}, \code{n_obs} (readings in the
+#'   fitted window; for \code{"fixed"}, all readings in the window, also when below \code{min_obs}),
+#'   \code{h2o_start} (first \code{H2O} reading of the closure, ppm; \code{NA} without an \code{H2O}
+#'   column; for \code{calculate_ghg_flux(h2o = "h2o_start")}), \code{slope} (per second, in the unit of the
 #'   \code{ghg} column: ppm for CO2, ppb for LI-COR CH4/N2O), \code{slope_unit} (e.g.
 #'   \code{"ppb s-1"}, from the \code{<ghg>_unit} column that \code{tidy_ghg_analyzer()} adds;
 #'   \code{NA} without that column),
@@ -782,8 +803,13 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   With \code{bubble_detection = TRUE} also \code{slope_regression}, \code{r_square_regression},
 #'   \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression} (the
 #'   regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}}),
-#'   \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error;
-#'   \code{NA} without a bubble), \code{slope_ebullition} (unit of \code{ghg} per second),
+#'   \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error, with the
+#'   effective sample size n(1 - r1)/(1 + r1) in the residual variance, because the OLS SE is biased
+#'   for autocorrelated 1 Hz readings (Kutzbach et al. 2007, p. 1011; Santer et al. 2000, Eq. 6 and
+#'   AdjSE, pp. 7343-7344); \code{NA} without a bubble or when the effective sample size is <= 2,
+#'   which then gets the label \code{"ebullition < diffusion + SE"}), \code{diffusion_r1} (lag-1 autocorrelation of the diffusion-line
+#'   residuals), \code{n_obs_diffusion} (readings in the diffusion segment;
+#'   \code{n_obs} without a bubble), \code{slope_ebullition} (unit of \code{ghg} per second),
 #'   \code{diffusion_start}, \code{diffusion_end} (the diffusion segment; the window without a
 #'   bubble), \code{total_start}, \code{total_start_conc}, \code{total_end_conc} (start time and
 #'   the two end points of the two-point total, which runs to the last reading; \code{NA} without
@@ -896,7 +922,7 @@ calculate_regression <- function(data, reference_df, ghg,
                                  g_factor_threshold = NULL,
                                  min_deadband = 30, max_deadband = 60, deadband_step = 10,
                                  min_window_size = 60, cutoff_step = 10, n_boot = 200,
-                                 bubble_detection = FALSE, ch4_options = list()) {
+                                 bubble_detection = FALSE, ch4_options = list(), min_obs = 60) {
 
   fit_type    <- match.arg(fit_type,    c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
   window_type <- match.arg(window_type, c("sliding", "fixed", "pareto"))
@@ -905,24 +931,37 @@ calculate_regression <- function(data, reference_df, ghg,
   if (bubble_detection && window_type != "fixed")
     stop("bubble_detection = TRUE needs window_type = \"fixed\": sliding and pareto windows pick ",
          "the best-fitting stretch, which avoids the bubbles.")
+  if (bubble_detection && toupper(ghg) != "CH4")
+    warning("bubble_detection = TRUE is meant for CH4 ebullition; splitting ", ghg, " anyway.", call. = FALSE)
+  if (!is.numeric(min_obs) || length(min_obs) != 1 || is.na(min_obs) || min_obs < 1)
+    stop("min_obs must be a single number >= 1.")
+  # a fit needs a residual degree of freedom: 2 readings always give a line with R2 = 1
+  need <- max(min_obs, .n_fit_params(fit_type) + 1L)
+  if (window_type == "sliding" && num_rows < need)
+    stop("num_rows (", num_rows, ") is below min_obs or the readings ", fit_type, " needs (", need, ").")
+  if (!ghg %in% names(data))
+    stop("`data` has no column \"", ghg, "\"",
+         if (toupper(ghg) %in% names(data)) paste0("; did you mean \"", toupper(ghg), "\"?") else ".")
+  miss <- setdiff(c(reference_time, site, "analyzer"), names(reference_df))
+  if (length(miss)) stop("`reference_df` has no column(s): ", paste(miss, collapse = ", "), ".")
+  if (!inherits(reference_df[[reference_time]], "POSIXct"))
+    stop("`reference_df$", reference_time, "` must be date-times (POSIXct), e.g. from lubridate::ymd_hms().")
+  # plain text, not a regex: "1337+1098" must match itself
+  keep <- stringr::str_detect(as.character(reference_df$analyzer),
+                              stringr::fixed(analyzer_code, ignore_case = TRUE)) %in% TRUE
+  if (!any(keep)) warning("No `reference_df$analyzer` contains \"", analyzer_code, "\": no rows returned.",
+                          call. = FALSE)
+  reference_df <- reference_df[keep, , drop = FALSE]
 
-  # For fit_type = "auto" (kappamax) or window_type = "pareto" (fit_score sigma + bootstrap),
-  # resolve instrument_precision from the built-in table if not supplied. Try to match by model
-  # name appearing in analyzer_code (case-insensitive); fall back to first row for the gas.
+  # fit_type = "auto" (kappamax) and window_type = "pareto" (fit_score sigma, bootstrap) need a
+  # precision: instrument_precision, else the <ghg>_prec column tidy_ghg_analyzer() adds, in the
+  # data's unit (as goFlux's prec argument and <gas>_prec columns; no guessing from analyzer names)
   if ((fit_type == "auto" || window_type == "pareto") && is.null(instrument_precision)) {
-    for_gas <- analyzer_precision[analyzer_precision$gas == toupper(ghg), ]
-    if (nrow(for_gas) > 0) {
-      hits <- which(vapply(for_gas$model, function(m)
-        grepl(m, analyzer_code, ignore.case = TRUE) ||
-        grepl(analyzer_code, m, ignore.case = TRUE), logical(1)))
-      prec_row <- if (length(hits) > 0) for_gas[hits[1], ] else for_gas[1, ]
-      instrument_precision <- prec_row$precision[1]
-    }
-  }
-
-  if (window_type == "pareto" && is.null(instrument_precision)) {
-    stop("window_type = 'pareto' requires instrument_precision (supply it directly, or use a ",
-         "gas/analyzer combination resolvable via the built-in analyzer_precision table).")
+    p <- unique(stats::na.omit(data[[paste0(ghg, "_prec")]]))
+    if (length(p) != 1)
+      stop("fit_type = \"auto\" and window_type = \"pareto\" need instrument_precision, or one value in a `",
+           ghg, "_prec` column of `data` (added by tidy_ghg_analyzer() for LI-COR data).")
+    instrument_precision <- p
   }
 
   reference_time_vec <- lubridate::force_tz(reference_df[[reference_time]], tzone = "Asia/Taipei")
@@ -945,6 +984,7 @@ calculate_regression <- function(data, reference_df, ghg,
   # clock times as Taipei, as the reference times; else a non-Taipei system gives no_data
   data$real_datetime <- lubridate::force_tz(data$real_datetime, tzone = "Asia/Taipei")
 
+  short_sites <- character(0)
   results <- purrr::map_dfr(seq_along(reference_time_vec), function(i) {
     reference_datetime <- reference_time_vec[i]
     dur_min_i     <- if (!is.na(duration_minutes_vec[i])) duration_minutes_vec[i] else duration_minutes
@@ -961,6 +1001,9 @@ calculate_regression <- function(data, reference_df, ghg,
     u <- unique(stats::na.omit(sorted_data[[paste0(ghg, "_unit")]]))
     if (length(u) > 1) stop("Mixed ", ghg, "_unit values for ", reference_site[i], ": ", paste(u, collapse = ", "))
     slope_unit <- if (length(u) == 1) paste0(u, " s-1") else NA_character_
+    # first H2O reading of the closure, as goFlux's flux term (goFlux.R, H2O_flux.term)
+    h2o <- if ("H2O" %in% names(sorted_data)) stats::na.omit(as.numeric(sorted_data$H2O)) else numeric(0)
+    h2o_start <- if (length(h2o)) h2o[1] else NA_real_
     if (anyDuplicated(sorted_data$real_datetime))
       warning("Duplicated timestamps for ", reference_site[i], ": does `data` hold more than one ",
               "analyzer? Pass one analyzer's readings per call.", call. = FALSE)
@@ -981,14 +1024,16 @@ calculate_regression <- function(data, reference_df, ghg,
     uncertainty_hi_out <- NA_real_
     n_candidates_out    <- NA_integer_
     force_discard        <- FALSE
+    n_obs_out            <- 0L
 
     if (window_type == "fixed") {
       win_start     <- reference_datetime + start_off_i
       win_end       <- win_start + as.numeric(dur_min_i) * 60
       selected_data <- sorted_data[sorted_data$real_datetime >= win_start &
                                    sorted_data$real_datetime <= win_end, ]
+      n_obs_out     <- nrow(selected_data)
 
-      if (nrow(selected_data) >= 2) {
+      if (n_obs_out >= need) {
         elapsed_s     <- as.numeric(difftime(selected_data$real_datetime,
                                              selected_data$real_datetime[1],
                                              units = "secs"))
@@ -1005,6 +1050,7 @@ calculate_regression <- function(data, reference_df, ghg,
         best_end_dt   <- selected_data$real_datetime[nrow(selected_data)]
       }
     } else if (window_type == "sliding") {
+      if (nrow(sorted_data) < num_rows) short_sites <<- c(short_sites, reference_site[i])
       if (nrow(sorted_data) >= num_rows) {
         for (j in 1:(nrow(sorted_data) - num_rows + 1)) {
           selected_data <- sorted_data[j:(j + num_rows - 1), ]
@@ -1035,7 +1081,7 @@ calculate_regression <- function(data, reference_df, ghg,
       pw <- .pareto_select_window(sorted_data, ghg, reference_datetime,
                                   fit_type, t_zero, kappamax, instrument_precision,
                                   min_deadband, max_deadband, deadband_step,
-                                  min_window_size, cutoff_step, n_boot)
+                                  min_window_size, cutoff_step, n_boot, need)
       n_candidates_out <- pw$n_candidates
 
       if (identical(pw$status, "no_candidates")) {
@@ -1058,6 +1104,9 @@ calculate_regression <- function(data, reference_df, ghg,
       # status == "no_grid" (too little data): best_* stay at their NA/-Inf defaults,
       # matching how "fixed"/"sliding" fall through to flag = "no_data" below.
     }
+
+    if (window_type != "fixed" && !is.na(best_start_dt))
+      n_obs_out <- sum(sorted_data$real_datetime >= best_start_dt & sorted_data$real_datetime <= best_end_dt)
 
     # Quality flag: correlation threshold distinguishes "zero" (no trend) from "discard" (poor fit).
     # For window_type = "pareto", an empty admitted-candidate pool is reported as "discard" rather
@@ -1122,6 +1171,8 @@ calculate_regression <- function(data, reference_df, ghg,
     out <- tibble(
       start_time           = format(best_start_dt, "%Y/%m/%d %H:%M:%S"),
       end_time             = format(best_end_dt, "%Y/%m/%d %H:%M:%S"),
+      n_obs                = n_obs_out,
+      h2o_start            = h2o_start,
       slope                = best_slope,
       slope_unit           = slope_unit,
       r_square             = best_r_square,
@@ -1146,6 +1197,8 @@ calculate_regression <- function(data, reference_df, ghg,
         correlation_regression = reg_qc$correlation, flag_regression = reg_qc$flag,
         g_factor_regression = reg_qc$g_factor, slope_total = split$total,
         slope_diffusion = split$diffusion, slope_diffusion_se = split$diff_se,
+        diffusion_r1 = split$diff_r1,
+        n_obs_diffusion = if (startsWith(split$ch4_flag, "no bubble")) n_obs_out else split$diff_n,
         slope_ebullition = split$ebullition,
         diffusion_start = format(as.POSIXct(split$diff_start, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
         diffusion_end = format(as.POSIXct(split$diff_end, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
@@ -1157,7 +1210,9 @@ calculate_regression <- function(data, reference_df, ghg,
     out
   })
 
-  results <- results[stringr::str_detect(tolower(results$analyzer), tolower(analyzer_code)), ]
+  if (length(short_sites))
+    warning("Fewer readings than num_rows (", num_rows, "), so no_data, for: ",
+            paste(unique(short_sites), collapse = ", "), call. = FALSE)
   return(results)
 
 }
@@ -1341,12 +1396,14 @@ apply_ch4_review <- function(regression_result, decisions, by = c("site", "refer
 
   tot <- d %in% "total"
   reg$slope[tot] <- reg$slope_total[tot]
-  reg[tot, c("slope_diffusion", "slope_diffusion_se", "slope_ebullition")] <- NA_real_
+  reg[tot, intersect(c("slope_diffusion", "slope_diffusion_se", "diffusion_r1",
+                       "slope_ebullition"), names(reg))] <- NA_real_
   nb <- d %in% "not_bubble"
   for (x in c("r_square", "correlation", "flag", "g_factor")) reg[[x]][nb] <- reg[[paste0(x, "_regression")]][nb]
   reg$slope[nb] <- reg$slope_total[nb] <- reg$slope_diffusion[nb] <- reg$slope_regression[nb]
   reg$slope_ebullition[nb] <- 0
   reg$slope_diffusion_se[nb] <- NA_real_
+  for (x in intersect("diffusion_r1", names(reg))) reg[[x]][nb] <- NA_real_
   reg$diffusion_start[nb] <- reg$start_time[nb]
   reg$diffusion_end[nb] <- reg$end_time[nb]
   reg$flag[d %in% "discard"] <- "discard"
@@ -1570,11 +1627,18 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #'   \code{slope_unit} column (from \code{calculate_regression()} on \code{tidy_ghg_analyzer()}
 #'   data), it is used for each row and \code{conc_unit} only fills rows where it is \code{NA};
 #'   a \code{conc_unit} given explicitly that contradicts it is an error.
+#' @param pressure Optional name of a column with air pressure (kPa). \code{NULL} (default) uses
+#'   101.325 kPa (1 atm).
+#' @param h2o Optional name of a column with water vapour (ppm), e.g. \code{h2o_start} from
+#'   \code{calculate_regression()}. \code{NULL} (default) treats the air as dry. The flux uses the
+#'   moles of dry air, V P (1 - H2O) / (R T A), as goFlux's \code{flux.term()} (Rheault et al.
+#'   2024), because LI-7810/7820 report dry mole fractions (LI-COR output tables).
 #' @return \code{data} with \code{flux} and \code{unit} added. When \code{data} has
 #'   \code{slope_diffusion} and \code{slope_ebullition} (from
 #'   \code{calculate_regression(bubble_detection = TRUE)}), \code{flux_diffusion} and
 #'   \code{flux_ebullition} are added too (and \code{flux_diffusion_se} from
-#'   \code{slope_diffusion_se}); \code{flux} is then the total CH4 flux, because
+#'   \code{slope_diffusion_se});
+#'   \code{flux} is then the total CH4 flux, because
 #'   \code{slope} holds the total slope for closures with a bubble.
 #' @examples
 #' data <- data.frame(
@@ -1588,7 +1652,7 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #' @export
 
 calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "volume", temp = "temp",
-                               conc_unit = c("ppm", "ppb")) {
+                               conc_unit = c("ppm", "ppb"), pressure = NULL, h2o = NULL) {
 
   given <- !missing(conc_unit)
   conc_unit <- match.arg(conc_unit)
@@ -1611,7 +1675,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   micro_to_milli <- 0.001  # micromoles to millimoles conversion
 
   # Check if specified columns exist in the data frame
-  required_cols <- c(slope, area, volume, temp)
+  required_cols <- c(slope, area, volume, temp, pressure, h2o)
   if (!all(required_cols %in% names(data))) {
     stop("One or more specified columns do not exist in the data frame.")
   }
@@ -1620,7 +1684,11 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   area <- data[[area]]
   volume <- data[[volume]]
   temp <- data[[temp]]
-  to_flux <- function(s) (s * to_ppm * volume * (1/s_to_hr) * micro_to_milli) /
+  # goFlux flux term V P (1 - H2O) / (R T A): LI-COR gases are dry mole fractions, so the moles of
+  # dry air in the chamber are needed; without the columns, 1 atm and dry air
+  p_atm <- if (is.null(pressure)) 1 else data[[pressure]] / 101.325
+  dry <- if (is.null(h2o)) 1 else 1 - data[[h2o]] / 1e6
+  to_flux <- function(s) (s * to_ppm * volume * p_atm * dry * (1/s_to_hr) * micro_to_milli) /
     (gas_constant * (temp + celsius_to_kelvin) * area)
 
   data$flux <- to_flux(data[[slope]])
@@ -1766,7 +1834,8 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   out <- data.frame(total = NA_real_, diffusion = NA_real_, ebullition = NA_real_,
                     n_bubbles = NA_integer_, ch4_flag = "too few readings",
                     diff_r2 = NA_real_, diff_cor = NA_real_, diff_se = NA_real_,
-                    diff_start = NA_real_, diff_end = NA_real_, total_s = NA_real_,
+                    diff_r1 = NA_real_,
+                    diff_start = NA_real_, diff_end = NA_real_, diff_n = NA_integer_, total_s = NA_real_,
                     total_t0 = NA_real_, total_c0 = NA_real_, total_c1 = NA_real_,
                     bubble_spans = NA_character_)
   o <- order(time)
@@ -1841,17 +1910,25 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
     out$total_s <- max(tt) - seg$fit[["start"]]
   } else out$total <- window_total
   ebul <- out$total - d
+  seg_i <- !excl & tt >= seg$fit[["start"]] & tt <= seg$fit[["end"]]
+  # 1 Hz residuals are autocorrelated, which biases the OLS SE (Kutzbach et al. 2007, p. 1011): residual
+  # variance with the effective sample size n_e = n (1 - r1) / (1 + r1) (Santer et al. 2000, Eq. 6,
+  # p. 7343; AdjSE, p. 7344); NA when n_e <= 2
+  e <- stats::residuals(stats::lm(conc[seg_i] ~ tt[seg_i]))
+  out$diff_r1 <- if (length(e) > 2) stats::acf(e, lag.max = 1, plot = FALSE, na.action = stats::na.pass)$acf[2] else NA_real_
+  ne <- length(e) * (1 - out$diff_r1) / (1 + out$diff_r1)
+  out$diff_se <- if (isTRUE(ne > 2)) seg$fit[["se"]] * sqrt((length(e) - 2) / (ne - 2)) else NA_real_
   labels <- c("diffusion > total flux"[d > out$total],
-              "ebullition < diffusion + SE"[ebul < d + seg$fit[["se"]] && d <= out$total],
+              # no SE (n_e <= 2): ebullition cannot be shown to exceed diffusion + SE, so review
+              "ebullition < diffusion + SE"[d <= out$total && !isFALSE(ebul < d + out$diff_se)],
               "no linear diffusion segment"[!seg$ok],
               # Sø et al. 2024 p. 6 and Minaudo et al. 2026 Guideline 4 (p. 10): diffusion after a bubble
               "diffusion after first bubble"[seg$fit[["start"]] > tt[which(flag)[1]]])
   out$ch4_flag <- if (length(labels)) paste(labels, collapse = "; ") else "ok"
   out$diffusion <- d
-  seg_i <- !excl & tt >= seg$fit[["start"]] & tt <= seg$fit[["end"]]
   out$diff_cor <- stats::cor(tt[seg_i], conc[seg_i])
   out$diff_r2 <- out$diff_cor^2
-  out$diff_se <- seg$fit[["se"]]
+  out$diff_n <- sum(seg_i)
   out$diff_start <- time[1] + seg$fit[["start"]]
   out$diff_end <- time[1] + seg$fit[["end"]]
   out$ebullition <- if (ebul >= 0 || opt$neg_ebullition == "keep") ebul else

@@ -29,7 +29,8 @@ calculate_regression(
   cutoff_step = 10,
   n_boot = 200,
   bubble_detection = FALSE,
-  ch4_options = list()
+  ch4_options = list(),
+  min_obs = 60
 )
 }
 \arguments{
@@ -43,7 +44,8 @@ calculate_regression(
 
 \item{site}{Column name in \code{reference_df} containing site identifiers.}
 
-\item{analyzer_code}{String pattern used to filter results by the \code{analyzer} column of \code{reference_df}.}
+\item{analyzer_code}{Text used to filter rows of \code{reference_df} by its \code{analyzer} column
+(plain text, not a regular expression; case is ignored). A warning is given when no row matches.}
 
 \item{duration_minutes}{The duration of the measurement window in minutes. Default 7.
 When \code{window_type = "fixed"} and \code{reference_df} contains a \code{duration_minutes}
@@ -61,8 +63,8 @@ specific measurement. This allows different window lengths for individual chambe
 accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a
 quadratic only when it levels off rather than accelerates (Levy et al. 2011), and exp_tz only
 when it levels off and its curvature parameter does not exceed \code{kappamax}). When \code{fit_type = "auto"} and
-\code{instrument_precision = NULL}, precision is looked up from \code{\link{analyzer_precision}}
-by gas name. The model chosen for each measurement is recorded in the \code{fit_used} output column.
+\code{instrument_precision = NULL}, precision is taken from the \code{<ghg>_prec} column that
+\code{\link{tidy_ghg_analyzer}} adds (an error without it). The model chosen for each measurement is recorded in the \code{fit_used} output column.
 The exponential models and their slope formulas follow fluxible (Gaudard et al. 2025); the curvature
 \code{b} is found by a one-dimensional search, with \code{Cm} and \code{a} solved by least squares for
 each \code{b}. \code{"exp_tz"} fits the initial concentration \code{C0} as well (Kutzbach et al.
@@ -241,9 +243,17 @@ silent; they were asked of the author (2026-11-10) and the defaults may change.
     code archive's \code{length.min}); FluxSeparator needs more than 50 readings (Sø et al.
     2024, p. 8).}
 }}
+
+\item{min_obs}{Fewest readings in a window (fixed, each sliding window, each pareto
+candidate) for a fit; fewer gives \code{flag = "no_data"}. Default 60, goFlux's
+\code{warn.length} (about 1 min at 1 Hz; Rheault et al. 2024, goFlux package documentation),
+where goFlux only warns. A fit also needs more readings than the model has parameters.}
 }
 \value{
-A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (per second, in the unit of the
+A tibble with columns: \code{start_time}, \code{end_time}, \code{n_obs} (readings in the
+  fitted window; for \code{"fixed"}, all readings in the window, also when below \code{min_obs}),
+  \code{h2o_start} (first \code{H2O} reading of the closure, ppm; \code{NA} without an \code{H2O}
+  column; for \code{calculate_ghg_flux(h2o = "h2o_start")}), \code{slope} (per second, in the unit of the
   \code{ghg} column: ppm for CO2, ppb for LI-COR CH4/N2O), \code{slope_unit} (e.g.
   \code{"ppb s-1"}, from the \code{<ghg>_unit} column that \code{tidy_ghg_analyzer()} adds;
   \code{NA} without that column),
@@ -265,8 +275,13 @@ A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (per sec
   With \code{bubble_detection = TRUE} also \code{slope_regression}, \code{r_square_regression},
   \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression} (the
   regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}}),
-  \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error;
-  \code{NA} without a bubble), \code{slope_ebullition} (unit of \code{ghg} per second),
+  \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error, with the
+  effective sample size n(1 - r1)/(1 + r1) in the residual variance, because the OLS SE is biased
+  for autocorrelated 1 Hz readings (Kutzbach et al. 2007, p. 1011; Santer et al. 2000, Eq. 6 and
+  AdjSE, pp. 7343-7344); \code{NA} without a bubble or when the effective sample size is <= 2,
+  which then gets the label \code{"ebullition < diffusion + SE"}), \code{diffusion_r1} (lag-1 autocorrelation of the diffusion-line
+  residuals), \code{n_obs_diffusion} (readings in the diffusion segment;
+  \code{n_obs} without a bubble), \code{slope_ebullition} (unit of \code{ghg} per second),
   \code{diffusion_start}, \code{diffusion_end} (the diffusion segment; the window without a
   bubble), \code{total_start}, \code{total_start_conc}, \code{total_end_conc} (start time and
   the two end points of the two-point total, which runs to the last reading; \code{NA} without

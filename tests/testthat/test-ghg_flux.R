@@ -1,7 +1,7 @@
 test_that("tidy_ghg_analyzer works correctly", {
   data <- tidy_ghg_analyzer(test_file("ch4.xlsx"), gas = "ch4")
   expect_true(!is.null(data))
-  column_names <- c("DATE", "TIME", "CO2", "CH4", "date_time", "CO2_unit", "CH4_unit")
+  column_names <- c("DATE", "TIME", "H2O", "CO2", "CH4", "date_time", "CO2_unit", "CH4_unit", "H2O_unit", "CH4_prec", "CO2_prec")
   expect_identical(column_names, names(data))
   expect_equal(unique(data$CH4_unit), "ppb")
   expect_equal(unique(data$CO2_unit), "ppm")
@@ -122,7 +122,7 @@ test_that("plot_ghg_flux draws fit_used, labels the unit and warns on no data", 
   ln <- ggplot2::layer_data(p, 2)
   expect_equal(ln$y, 2000 + 2 * ln$x - 0.004 * ln$x^2, tolerance = 1e-3)
   expect_equal(p$labels$y, "CH4 (ppb)")
-  ra <- calculate_regression(d, ref, "CH4", "date_time", "site", "a", fit_type = "auto",
+  ra <- calculate_regression(d, ref, "CH4", "date_time", "site", "a", fit_type = "auto", instrument_precision = 0.6,
                              duration_minutes = 299 / 60)
   expect_s3_class(plot_ghg_flux(d, ra, "CH4", fit_type = "auto"), "ggplot")
   expect_warning(expect_null(plot_ghg_flux(transform(d, real_datetime = real_datetime + 86400), r, "CH4")),
@@ -308,9 +308,10 @@ test_that("calculate_regression returns no_data when window has insufficient row
     date_time = as.POSIXct("2024-12-16 12:00:00", tz = "Asia/Taipei"),
     site = "S1", analyzer = "TEST"
   )
-  result <- calculate_regression(data, ref, "CH4",
+  expect_warning(result <- calculate_regression(data, ref, "CH4",
                                  reference_time = "date_time",
-                                 site = "site", analyzer_code = "TEST", window_type = "sliding")
+                                 site = "site", analyzer_code = "TEST", window_type = "sliding"),
+                 "Fewer readings than num_rows")
   expect_equal(result$flag, "no_data")
 })
 
@@ -350,12 +351,12 @@ test_that("calculate_regression kappamax falls back to linear when b exceeds thr
                                       reference_time = "date_time",
                                       site = "site", analyzer_code = "TEST",
                                       fit_type = "exp_tz", window_type = "fixed",
-                                      duration_minutes = 1)
+                                      duration_minutes = 1, min_obs = 20)
   result_kmax <- calculate_regression(data, ref, "CH4",
                                       reference_time = "date_time",
                                       site = "site", analyzer_code = "TEST",
                                       fit_type = "exp_tz", window_type = "fixed",
-                                      duration_minutes = 1, kappamax = 0.05)
+                                      duration_minutes = 1, kappamax = 0.05, min_obs = 20)
   expect_false(is.na(result_exp$b_param))
   expect_gt(result_exp$b_param, 0.05)           # b >> kappamax triggers fallback
   expect_false(isTRUE(all.equal(result_exp$slope, result_kmax$slope, tolerance = 0.001)))
@@ -433,6 +434,12 @@ test_that("calculate_regression bubble_detection = TRUE splits synthetic CH4 tra
   expect_equal(step$slope_diffusion, 1e-4, tolerance = 0.1)
   expect_equal(step$slope_total, 1e-4 + 0.05 / 299, tolerance = 0.05)
   expect_equal(step$slope_ebullition, step$slope_total - step$slope_diffusion)
+  expect_equal(ramp$n_obs_diffusion, ramp$n_obs)
+  expect_equal(step$n_obs, 300)
+  in_seg <- sec >= as.numeric(as.POSIXct(step$diffusion_start, tz = "Asia/Taipei") - as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei"), units = "secs") &
+    sec <= as.numeric(as.POSIXct(step$diffusion_end, tz = "Asia/Taipei") - as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei"), units = "secs")
+  expect_lte(step$n_obs_diffusion, sum(in_seg))
+  expect_gte(step$n_obs_diffusion, sum(in_seg) - 1)  # trim_to_min may drop the lowest reading
   fl <- calculate_ghg_flux(cbind(step, area = 1, volume = 1, temp = 25))
   expect_equal(fl$flux, fl$flux_diffusion + fl$flux_ebullition)
 
@@ -641,7 +648,7 @@ test_that("g_factor is NA when auto mode selects linear (no upgrade)", {
   result <- calculate_regression(data, ref, "CH4",
                                  reference_time = "date_time",
                                  site = "site", analyzer_code = "TEST",
-                                 fit_type = "auto", window_type = "fixed",
+                                 fit_type = "auto", window_type = "fixed", instrument_precision = 0.6,
                                  duration_minutes = 7)
   expect_equal(result$fit_used, "linear")
   expect_true(is.na(result$g_factor))
@@ -662,7 +669,7 @@ test_that("g_factor is computed when auto mode selects quadratic", {
   result <- calculate_regression(data, ref, "CH4",
                                  reference_time = "date_time",
                                  site = "site", analyzer_code = "TEST",
-                                 fit_type = "auto", window_type = "fixed",
+                                 fit_type = "auto", window_type = "fixed", instrument_precision = 0.6,
                                  duration_minutes = 7)
   expect_equal(result$fit_used, "quadratic")
   expect_false(is.na(result$g_factor))
@@ -685,7 +692,7 @@ test_that("auto mode keeps linear when the quadratic accelerates (Levy et al. 20
   result <- suppressWarnings(calculate_regression(data, ref, "CH4",
                                  reference_time = "date_time",
                                  site = "site", analyzer_code = "TEST",
-                                 fit_type = "auto", window_type = "fixed",
+                                 fit_type = "auto", window_type = "fixed", instrument_precision = 0.6,
                                  duration_minutes = 7))
   expect_equal(result$fit_used, "linear")
   expect_true(is.na(result$g_factor))
@@ -705,19 +712,19 @@ test_that("g_factor_threshold overrides ok to discard when ratio exceeds limit",
   result_no_gf <- calculate_regression(data, ref, "CH4",
                                        reference_time = "date_time",
                                        site = "site", analyzer_code = "TEST",
-                                       fit_type = "auto", window_type = "fixed",
+                                       fit_type = "auto", window_type = "fixed", instrument_precision = 0.6,
                                        duration_minutes = 7)
   # g_factor ~1.72; threshold 1.5 triggers discard, threshold 2 does not
   result_triggered <- calculate_regression(data, ref, "CH4",
                                            reference_time = "date_time",
                                            site = "site", analyzer_code = "TEST",
-                                           fit_type = "auto", window_type = "fixed",
+                                           fit_type = "auto", window_type = "fixed", instrument_precision = 0.6,
                                            duration_minutes = 7,
                                            g_factor_threshold = 1.5)
   result_not_triggered <- calculate_regression(data, ref, "CH4",
                                                reference_time = "date_time",
                                                site = "site", analyzer_code = "TEST",
-                                               fit_type = "auto", window_type = "fixed",
+                                               fit_type = "auto", window_type = "fixed", instrument_precision = 0.6,
                                                duration_minutes = 7,
                                                g_factor_threshold = 2)
   expect_equal(result_no_gf$flag, "ok")
@@ -1227,4 +1234,91 @@ test_that("pareto residual-bootstrap 68% interval achieves nominal coverage on s
   # ordinary Monte Carlo noise around 0.68 is expected to pass. See file header comment above
   # for the reasoning behind the 1% significance threshold.
   expect_gt(test_result$p.value, 0.01)
+})
+
+test_that("min_obs: too few readings give no_data; n_obs counts the window", {
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  ref <- data.frame(date_time = t0, site = "P1", analyzer = "a")
+  reg <- function(n, ...) calculate_regression(
+    data.frame(real_datetime = t0 + seq(0, 200, length.out = n), CH4 = 2 + seq(0, 0.5, length.out = n) + rep_len(c(0, 1e-3), n)),
+    ref, "CH4", reference_time = "date_time", site = "site", analyzer_code = "a", duration_minutes = 5, ...)
+  expect_equal(reg(2, min_obs = 1)$flag, "no_data")       # a line through 2 points always has R2 = 1
+  expect_equal(reg(3, min_obs = 1)$flag, "ok")
+  expect_equal(reg(3, min_obs = 1, fit_type = "quadratic")$flag, "no_data")
+  expect_equal(reg(59)$flag, "no_data")                     # default 60
+  expect_equal(reg(59)$n_obs, 59)
+  expect_equal(reg(60)$flag, "ok")
+  expect_equal(reg(60)$n_obs, 60)
+  expect_error(reg(60, min_obs = NA), "min_obs")
+  expect_error(reg(60, window_type = "sliding", num_rows = 30), "num_rows")
+  expect_warning(reg(60, window_type = "sliding", num_rows = 100), "Fewer readings than num_rows.*P1")
+})
+
+test_that("calculate_regression and tidy_ghg_analyzer stop on wrong inputs", {
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  d <- data.frame(real_datetime = t0 + 0:299, CH4 = 2 + 1e-4 * (0:299) + c(0, 1e-5), CO2 = 400 + 0.01 * (0:299) + c(0, 1e-3))
+  ref <- data.frame(date_time = t0, site = "P1", analyzer = "LI-7810 1337+1098")
+  reg <- function(..., r = ref, ghg = "CH4", code = "1337+1098")
+    calculate_regression(d, r, ghg, reference_time = "date_time", site = "site", analyzer_code = code,
+                         duration_minutes = 299 / 60, ...)
+  expect_equal(nrow(reg()), 1)                                    # "+" is text, not a regex
+  expect_equal(nrow(reg(code = "li-7810")), 1)                    # case ignored
+  expect_warning(out <- reg(code = "9999"), "No `reference_df\\$analyzer` contains")
+  expect_equal(nrow(out), 0)
+  expect_error(reg(ghg = "ch4"), "did you mean \"CH4\"")
+  expect_error(reg(r = ref[c("date_time", "site")]), "no column\\(s\\): analyzer")
+  expect_error(reg(r = transform(ref, date_time = "2024-01-01 08:00:00")), "POSIXct")
+  expect_warning(reg(ghg = "CO2", bubble_detection = TRUE), "meant for CH4")
+  expect_error(tidy_ghg_analyzer("none.xlsx", "co2"), "Unsupported analyzer/gas")
+  expect_error(tidy_ghg_analyzer("none.xlsx", "n2o", analyzer = "lgr"), "Unsupported analyzer/gas")
+})
+
+test_that("precision comes from instrument_precision or the <ghg>_prec column, never from analyzer names", {
+  x <- tidy_ghg_analyzer(system.file("extdata", "ch4.xlsx", package = "aelab"), "ch4")
+  expect_equal(unique(x$CH4_prec), 0.6)
+  expect_equal(unique(x$CO2_prec), 3.5)
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  e <- 0:299
+  set.seed(1)
+  d <- data.frame(real_datetime = t0 + e, CH4 = 2000 + 2 * e - 0.004 * e^2 + rnorm(300, 0, 0.5))
+  ref <- data.frame(date_time = t0, site = "x", analyzer = "1337")
+  reg <- function(d, ...) calculate_regression(d, ref, "CH4", "date_time", "site", "1337", fit_type = "auto",
+                                               duration_minutes = 299 / 60, ...)
+  expect_error(reg(d), "need instrument_precision")              # was: silent LI-7810 fallback
+  expect_error(reg(transform(d, CH4_prec = rep(c(0.6, 2), 150))), "one value")
+  expect_equal(reg(transform(d, CH4_prec = 0.6)), reg(d, instrument_precision = 0.6))
+})
+
+test_that("calculate_ghg_flux pressure and h2o terms; h2o_start from the first reading", {
+  base <- data.frame(slope = 1, area = 1, volume = 1, temp = 25)
+  f0 <- calculate_ghg_flux(base)$flux
+  expect_equal(calculate_ghg_flux(cbind(base, p = 101.325, w = 0), pressure = "p", h2o = "w")$flux, f0)
+  expect_equal(calculate_ghg_flux(cbind(base, p = 101.325 / 2), pressure = "p")$flux, f0 / 2)
+  expect_equal(calculate_ghg_flux(cbind(base, w = 30000), h2o = "w")$flux, 0.97 * f0)
+  expect_error(calculate_ghg_flux(base, h2o = "w"), "do not exist")
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  d <- data.frame(real_datetime = t0 + 0:299, CH4 = 2 + 1e-4 * (0:299) + c(0, 1e-5), H2O = c(NA, 25000 + 0:298))
+  ref <- data.frame(date_time = t0, site = "x", analyzer = "a")
+  r <- calculate_regression(d, ref, "CH4", "date_time", "site", "a", duration_minutes = 299 / 60)
+  expect_equal(r$h2o_start, 25000)
+  expect_true(is.na(calculate_regression(d[c("real_datetime", "CH4")], ref, "CH4", "date_time", "site", "a",
+                                         duration_minutes = 299 / 60)$h2o_start))
+  x <- tidy_ghg_analyzer(system.file("extdata", "ch4.xlsx", package = "aelab"), "ch4")
+  expect_true(is.numeric(x$H2O) && all(x$H2O_unit == "ppm"))
+})
+
+test_that("slope_diffusion_se uses the effective sample size for autocorrelated residuals (Santer et al. 2000)", {
+  opt <- aelab:::.ch4_options(list())
+  sec <- 0:299
+  ols <- function(s) {  # plain OLS SE of the same segment
+    i <- sec >= s$diff_start & sec <= s$diff_end
+    summary(lm(y[i] ~ sec[i]))$coefficients[2, 2]
+  }
+  set.seed(2); y <- 2 + 1e-4 * sec + ifelse(sec >= 150, 0.05, 0) + rnorm(300, 0, 3e-4)
+  white <- aelab:::.separate_ch4(sec, y, opt)
+  expect_equal(white$diff_se / ols(white), 1, tolerance = 0.25)            # no autocorrelation: about OLS
+  set.seed(2); y <- 2 + 1e-4 * sec + ifelse(sec >= 150, 0.05, 0) + as.numeric(stats::arima.sim(list(ar = 0.8), 300, sd = 1.5e-4))
+  ar <- aelab:::.separate_ch4(sec, y, opt)
+  expect_gt(ar$diff_r1, 0.5)
+  expect_gt(ar$diff_se / ols(ar), 2)
 })

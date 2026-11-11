@@ -1,5 +1,49 @@
 # aelab (development version)
 
+## Diffusion SE with autocorrelated readings
+
+* `slope_diffusion_se` now uses the effective sample size n(1 - r1)/(1 + r1) in the residual
+  variance (Santer et al. 2000, Eq. 6, AdjSE), because the OLS SE is biased for autocorrelated
+  1 Hz readings (Kutzbach et al. 2007, p. 1011); on 97 CarbonIMTA diffusion segments the residual
+  r1 was significant in 96 (median 0.83) and the SE grew a median 4.5 times. New column
+  `diffusion_r1`. The SE is `NA` when the effective sample size is <= 2, and those closures get the
+  review label "ebullition < diffusion + SE" (2 of 160 CarbonIMTA closures; no flux changes).
+
+## Pressure and water vapour in the flux
+
+* `calculate_ghg_flux()` gains `pressure` (column, kPa) and `h2o` (column, ppm), both `NULL` by
+  default (1 atm, dry air: results unchanged). The flux uses the moles of dry air,
+  V P (1 - H2O) / (R T A), as goFlux's `flux.term()`, because LI-7810/7820 report dry mole
+  fractions; leaving out H2O reads about 2-4 % high in humid air.
+* `tidy_ghg_analyzer()` keeps the LI-COR `H2O` column (ppm, with `H2O_unit`);
+  `calculate_regression()` adds `h2o_start`, the first H2O reading of the closure (as goFlux), for
+  `calculate_ghg_flux(h2o = "h2o_start")`.
+
+## Instrument precision
+
+* `fit_type = "auto"` and `window_type = "pareto"` no longer guess the precision by matching
+  `analyzer_code` against model names (a serial number silently got LI-7810 values, in ppb even
+  for ppm data). The precision is now `instrument_precision`, else the `<ghg>_prec` column, else
+  an error, as goFlux's `prec` argument and `<gas>_prec` columns.
+* `tidy_ghg_analyzer()` adds `CH4_prec`, `CO2_prec` (LI-7810) and `N2O_prec` (LI-7820) to LI-COR
+  data, in the data's unit; the `n2o` dataset gains `N2O_prec`.
+* `analyzer_precision`: LGR UGGA rows removed (no vendor source found).
+
+## Input checks and reading counts
+
+* New `min_obs` in `calculate_regression()` (default 60, goFlux's `warn.length`): a window with
+  fewer readings gives `flag = "no_data"` (goFlux only warns). A fit also needs more readings than
+  the model has parameters, so 2 readings no longer give `ok` with R² = 1. Applies to fixed,
+  each sliding window and each pareto candidate.
+* New columns `n_obs` (readings in the fitted window) and, with `bubble_detection = TRUE`,
+  `n_obs_diffusion`.
+* `analyzer_code` is matched as plain text (case ignored), not as a regular expression, so
+  `"1337+1098"` matches itself; a warning is given when no `reference_df` row matches.
+* Clear errors for a `ghg` that is not a column of `data`, missing `reference_df` columns, a
+  non-date-time `reference_time`, `num_rows` below `min_obs`, and unsupported analyzer/gas pairs
+  in `tidy_ghg_analyzer()`; warnings for sliding closures with fewer readings than `num_rows` and
+  for `bubble_detection = TRUE` on a gas other than CH4.
+
 ## CH4 bubble flux (`calculate_regression()`)
 
 * Bubble detection now runs on the readings linearly interpolated to a 1 s grid, as the code
