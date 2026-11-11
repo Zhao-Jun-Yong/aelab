@@ -9,19 +9,28 @@ calculate_ghg_flux(
   slope = "slope",
   area = "area",
   volume = "volume",
-  temp = "temp"
+  temp = "temp",
+  conc_unit = c("ppm", "ppb")
 )
 }
 \arguments{
 \item{data}{A data frame containing relevant data with columns for slope, area, volume, and temperature.}
 
-\item{slope}{Name of the column in `data` that contains the slope values of the GHG concentration change (in ppm/s).}
+\item{slope}{Name of the column in `data` that contains the slope values of the GHG concentration change
+(in ppm/s, or ppb/s with \code{conc_unit = "ppb"}).}
 
 \item{area}{Name of the column in `data` that contains the values of the area of the chamber (in square meter).}
 
 \item{volume}{Name of the column in `data` that contains values of the volume of the chamber (in litre).}
 
 \item{temp}{Name of the column in `data` that contains values of the temperature of the gas (in Celsius).}
+
+\item{conc_unit}{Unit of the concentration the slopes were fitted to: \code{"ppm"} (default) or
+\code{"ppb"}. LI-COR CH4 and N2O from \code{tidy_ghg_analyzer()} are in ppb; \code{"ppb"} slopes
+are divided by 1000 so the flux stays in mmol m-2 h-1. When \code{data} has a
+\code{slope_unit} column (from \code{calculate_regression()} on \code{tidy_ghg_analyzer()}
+data), it is used for each row and \code{conc_unit} only fills rows where it is \code{NA};
+a \code{conc_unit} given explicitly that contradicts it is an error.}
 }
 \value{
 \code{data} with \code{flux} and \code{unit} added. When \code{data} has

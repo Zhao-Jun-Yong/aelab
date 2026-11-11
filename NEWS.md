@@ -2,6 +2,12 @@
 
 ## CH4 bubble flux (`calculate_regression()`)
 
+* Bubble detection now runs on the readings linearly interpolated to a 1 s grid, as the code
+  archive (`find_bubbles.R`, lines 35-36), so `bubble_window`, `merge_gap`, `min_len` and
+  `bubble_pad` are seconds whatever the logging interval. Results are unchanged for 1 Hz data
+  without gaps; they change for other intervals and for closures with missing readings (a clean
+  line with a 60 s gap or 5 s sampling no longer shows false bubbles).
+
 * New `bubble_detection` in `calculate_regression()` (default `FALSE`, unchanged); `TRUE` splits each
   CH4 closure into total, diffusive and ebullitive slopes with the automated method of Minaudo et al.
   (2026, *Limnology and Oceanography: Methods* 24, e70054, pp. 3-4, doi:10.1002/lom3.70054; code
@@ -96,6 +102,15 @@
   coordinates using the suncalc package, replacing manual sunrise/sunset lookup.
 
 ## Modified functions
+
+* `calculate_ghg_flux()` — new `conc_unit = c("ppm", "ppb")` (default `"ppm"`, unchanged).
+  `"ppb"` divides slopes by 1000, so ppb slopes (LI-COR CH4/N2O from `tidy_ghg_analyzer()`) give
+  mmol m-2 h-1 as labelled; before, they gave a value 1000 times too large under that label. A
+  `slope_unit` column in `data` is used per row instead; an explicit `conc_unit` that contradicts
+  it is an error. The vignette CH4 example now gives the right value, and its text says h-1 (not d-1).
+* `tidy_ghg_analyzer()` adds `CO2_unit`, `CH4_unit` and `N2O_unit` columns (LI-COR: ppm CO2,
+  ppb CH4/N2O; LGR: ppm). `calculate_regression()` returns `slope_unit` (e.g. `"ppb s-1"`) from
+  them, `NA` when `data` has no such column.
 
 * `process_hobo()` — added `type` parameter (`"do"` or `"temp"`). `type = "do"` (default)
   retains existing behaviour for the HOBO U26 Dissolved Oxygen Data Logger. `type = "temp"`

@@ -1,8 +1,31 @@
 test_that("tidy_ghg_analyzer works correctly", {
   data <- tidy_ghg_analyzer(test_file("ch4.xlsx"), gas = "ch4")
   expect_true(!is.null(data))
-  column_names <- c("DATE", "TIME", "CO2", "CH4", "date_time")
+  column_names <- c("DATE", "TIME", "CO2", "CH4", "date_time", "CO2_unit", "CH4_unit")
   expect_identical(column_names, names(data))
+  expect_equal(unique(data$CH4_unit), "ppb")
+  expect_equal(unique(data$CO2_unit), "ppm")
+})
+
+test_that("slope_unit flows from tidy_ghg_analyzer() to calculate_ghg_flux()", {
+  ch4 <- tidy_ghg_analyzer(test_file("ch4.xlsx"), gas = "ch4")
+  ref <- data.frame(date_time = ch4$date_time[1], site = "x", analyzer = "a")
+  r <- suppressWarnings(calculate_regression(ch4, ref, "CH4", reference_time = "date_time", site = "site",
+                                             analyzer_code = "a", window_type = "fixed", duration_minutes = 2))
+  expect_equal(r$slope_unit, "ppb s-1")
+  d <- cbind(r, area = 1, volume = 1, temp = 25)
+  f <- calculate_ghg_flux(d)  # no conc_unit needed
+  expect_equal(f$flux, calculate_ghg_flux(transform(d, slope_unit = NA), conc_unit = "ppb")$flux)
+  expect_equal(calculate_ghg_flux(d, conc_unit = "ppb")$flux, f$flux)
+  expect_error(calculate_ghg_flux(d, conc_unit = "ppm"), "contradicts")
+  expect_error(calculate_ghg_flux(transform(d, slope_unit = "mg s-1")), "Unknown slope_unit")
+  # data without a unit column: slope_unit NA, conc_unit used
+  r2 <- suppressWarnings(calculate_regression(ch4[c("date_time", "CH4")], ref, "CH4", reference_time = "date_time",
+                                              site = "site", analyzer_code = "a", window_type = "fixed",
+                                              duration_minutes = 2))
+  expect_true(is.na(r2$slope_unit))
+  r3 <- r2; r3$slope_unit <- NULL
+  expect_equal(calculate_ghg_flux(cbind(r3, area = 1, volume = 1, temp = 25))$flux, f$flux * 1000)
 })
 
 test_that("convert_time adjusts datetime correctly", {
@@ -310,6 +333,39 @@ test_that("calculate_ghg_flux uses 3600 s h-1 giving mmol m-2 h-1", {
   result <- calculate_ghg_flux(df)
   expect_equal(result$flux, 3600 * 0.001 / (0.082057 * 298.15), tolerance = 0.001)
   expect_equal(result$unit, "mmol m-2 h-1")
+})
+
+test_that("calculate_ghg_flux conc_unit = 'ppb' scales slopes by 1/1000", {
+  ppm <- data.frame(slope = 1, slope_diffusion = 0.5, slope_ebullition = 0.5,
+                    area = 1, volume = 1, temp = 25)
+  ppb <- transform(ppm, slope = 1000, slope_diffusion = 500, slope_ebullition = 500)
+  cols <- c("flux", "flux_diffusion", "flux_ebullition")
+  expect_equal(calculate_ghg_flux(ppb, conc_unit = "ppb")[cols], calculate_ghg_flux(ppm)[cols])
+  expect_error(calculate_ghg_flux(ppm, conc_unit = "ppt"))
+})
+
+test_that("bubble detection works in seconds: 5 s sampling and a 60 s gap", {
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  split_at <- function(sec, ch4) {
+    calculate_regression(data.frame(real_datetime = t0 + sec, CH4 = ch4),
+                         data.frame(date_time = t0, site = "x", analyzer = "a"), "CH4",
+                         reference_time = "date_time", site = "site", analyzer_code = "a",
+                         window_type = "fixed", duration_minutes = 299 / 60, bubble_detection = TRUE)
+  }
+  set.seed(1)
+  sec <- 0:299
+  line <- 2000 + 1 * sec + rnorm(300, 0, 0.6)  # clean 1 ppb/s, no bubble (Fable review V8)
+  expect_equal(split_at(sec, line)$ch4_flag, "no bubble")
+  gap <- sec < 100 | sec >= 160
+  expect_equal(split_at(sec[gap], line[gap])$ch4_flag, "no bubble")
+  five <- sec %% 5 == 0
+  expect_equal(split_at(sec[five], 2000 + 3 * sec[five] + rnorm(60, 0, 0.6))$ch4_flag, "no bubble")
+  # a 500 ppb step at 100 s is still found at 5 s sampling (a 50 ppb one becomes a 5 s ramp below
+  # the 1e-4 variance minimum)
+  step <- 2000 + 0.1 * sec + ifelse(sec >= 100, 500, 0) + rnorm(300, 0, 0.3)
+  s5 <- split_at(sec[five], step[five])
+  expect_equal(s5$n_bubbles, 1L)
+  expect_equal(s5$slope_diffusion, 0.1, tolerance = 0.3)
 })
 
 # CH4 split in calculate_regression(bubble_detection = TRUE): fixed 299 s window from t0 + off

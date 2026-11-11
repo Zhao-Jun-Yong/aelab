@@ -13,7 +13,9 @@ utils::globalVariables(c("CO2", "CH4", "N2O", "conc", "analyzer_precision"))
 #' @param hr Hour offset to correct the analyzer timestamp.
 #' @param min Minute offset to correct the analyzer timestamp.
 #' @param sec Second offset to correct the analyzer timestamp.
-#' @return Return the loaded XLSX file after tidying. If any time offset is non-zero, a
+#' @return Return the loaded XLSX file after tidying, with one \code{<gas>_unit} column per gas
+#'   (\code{CO2_unit}, \code{CH4_unit}, \code{N2O_unit}: \code{"ppm"} or \code{"ppb"}), which
+#'   \code{calculate_regression()} turns into \code{slope_unit}. If any time offset is non-zero, a
 #'   \code{real_datetime} column is added via \code{\link{convert_time}}.
 #' @examples
 #' ghg_data_path <- system.file("extdata", "ch4.xlsx", package = "aelab")
@@ -76,6 +78,10 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
       data$date_time <- as.POSIXct(data$date_time, format = "%m/%d/%Y %H:%M:%S")
     }
   }
+
+  # concentration unit per gas, carried by calculate_regression() into slope_unit
+  units <- if (analyzer == "licor") c(CO2 = "ppm", CH4 = "ppb", N2O = "ppb") else c(CO2 = "ppm", CH4 = "ppm")
+  for (g in intersect(names(units), names(data))) data[[paste0(g, "_unit")]] <- units[[g]]
 
   # Apply timestamp correction if any offset is provided
   if (day != 0 || hr != 0 || min != 0 || sec != 0) {
@@ -578,7 +584,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   column, the per-row value (if not \code{NA}) overrides this global parameter for that
 #'   specific measurement. This allows different window lengths for individual chamber closures.
 #' @param num_rows The number of rows used per sliding regression window. Only used when
-#'   \code{window_type = "sliding"}. Default 300.
+#'   \code{window_type = "sliding"}. Default 300 (5 min at 1 Hz; set it for your logging interval).
 #' @param fit_type Model used to fit the concentration curve. One of \code{"linear"} (default),
 #'   \code{"quadratic"} (second-order polynomial; slope is the initial rate at t=0),
 #'   \code{"exp_tz"} (exponential with linear drift and user-specified \code{t_zero}),
@@ -671,12 +677,15 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   \doi{10.5281/zenodo.18710431}). The split uses the readings of the closure's final window,
 #'   (\code{window_type = "fixed"} only). Per closure:
 #'   \itemize{
-#'     \item Bubbles: the concentration is divided by its mean, its variance is taken in a moving
-#'       window of readings, and readings whose variance is above a percentile of all variances
+#'     \item Bubbles: the readings are linearly interpolated to a 1 s grid (as the code archive,
+#'       \code{find_bubbles.R}, lines 35-36, so any logging interval and gaps are handled), the
+#'       concentration is divided by its mean, its variance is taken in a moving
+#'       window of seconds, and seconds whose variance is above a percentile of all variances
 #'       (minimum 1e-4) are flagged; flagged segments close together are merged and short ones
-#'       dropped (Minaudo et al. 2026, p. 4). Because the variance is of the raw readings, a steep
-#'       clean rise (above about 0.3\% of the mean concentration per reading, e.g. 2 to 6 ppm in
-#'       300 s at 1 Hz) is itself flagged as bubbles; removing each window's trend first was tried
+#'       dropped (Minaudo et al. 2026, p. 4). A reading is flagged when its nearest second is.
+#'       Because the variance is not detrended, a steep
+#'       clean rise (above about 0.3\% of the mean concentration per second, e.g. 2 to 6 ppm in
+#'       300 s) is itself flagged as bubbles; removing each window's trend first was tried
 #'       and also hid real bubbles, so such closures are left to review (\code{review_needed}).
 #'     \item No bubble: \code{slope} is the regression slope, as with \code{bubble_detection = FALSE};
 #'       total = diffusion = that slope, ebullition = 0.
@@ -694,28 +703,28 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'       the first block (as the code archive); ebullition = total - diffusion.
 #'   }
 #' @param ch4_options Only for \code{bubble_detection = TRUE} (always checked): a named list
-#'   overriding any of the settings below. \code{bubble_window}, \code{merge_gap},
-#'   \code{min_len} and \code{bubble_pad} count readings, \code{early_s} and
-#'   \code{min_diffusion_s} are seconds: at 5 s sampling a 10-reading window spans 50 s. Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
+#'   overriding any of the settings below. All lengths are seconds, whatever the
+#'   logging interval (\code{bubble_window}, \code{merge_gap} and \code{min_len} on the 1 s grid;
+#'   at 1 Hz without gaps a second is a reading). Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
 #'   marked \emph{pending} are where the paper and its code archive differ or the paper is
 #'   silent; they were asked of the author (2026-11-10) and the defaults may change.
 #'   \describe{
-#'     \item{\code{bubble_window}}{Readings in the moving variance window. Default 10 (paper);
+#'     \item{\code{bubble_window}}{Seconds in the moving variance window. Default 10 (paper, 1 Hz);
 #'       the code uses 11. \emph{Pending.}}
-#'     \item{\code{bubble_align}}{Which reading a window's variance belongs to: \code{"centre"}
-#'       (default; reading 6 of 10), \code{"start"} or \code{"end"}. The paper does not say.
-#'       \emph{Pending.} Readings that no window can own are never flagged: with
+#'     \item{\code{bubble_align}}{Which second a window's variance belongs to: \code{"centre"}
+#'       (default; second 6 of 10), \code{"start"} or \code{"end"}. The paper does not say.
+#'       \emph{Pending.} Seconds that no window can own are never flagged: with
 #'       \code{"centre"} the first \code{bubble_window \%/\% 2} and the last
 #'       \code{bubble_window - 1 - bubble_window \%/\% 2} (5 and 4 by default), so a bubble in
-#'       the last few readings is missed; with \code{"start"} the last, with \code{"end"} the first
+#'       the last few seconds is missed; with \code{"start"} the last, with \code{"end"} the first
 #'       \code{bubble_window - 1}.}
 #'     \item{\code{bubble_prob}}{Percentile of the variances above which readings are flagged.
 #'       Default 0.75 (paper); the code uses 0.7. \emph{Pending.}}
-#'     \item{\code{merge_gap}}{Flagged segments separated by fewer than this many readings are
+#'     \item{\code{merge_gap}}{Flagged segments separated by fewer than this many seconds are
 #'       merged. Default 10 (paper); the code also merges a gap of exactly 10 (\code{11}).
 #'       \emph{Pending.}}
-#'     \item{\code{min_len}}{Flagged segments shorter than this many readings are dropped.
-#'       Default 5 (paper, a 5-reading segment is kept); the code drops it (\code{6}).
+#'     \item{\code{min_len}}{Flagged segments shorter than this many seconds are dropped.
+#'       Default 5 (paper, a 5 s segment is kept); the code drops it (\code{6}).
 #'       \emph{Pending.}}
 #'     \item{\code{early_s}, \code{early_from}}{A bubble starting within \code{early_s} seconds
 #'       (default 20, paper) of \code{early_from} gives the total only. \code{"window"} (default)
@@ -744,14 +753,17 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'       its code, no value in the paper). Applied after the early-bubble rule, so it never
 #'       changes an early-bubble closure; with no bubble left the closure is
 #'       \code{"no bubble: rises <= min_rise"}. Default 0 (off).}
-#'     \item{\code{bubble_pad}}{Readings added before and after each flagged segment before the
+#'     \item{\code{bubble_pad}}{Seconds added before and after each flagged segment before the
 #'       diffusion segment is searched, as FluxSeparator's \code{IndexSpan} (Sø et al. 2024, p. 5;
-#'       30 in its code). Applied after the early-bubble rule. Default 0.}
+#'       30 readings in its code, at 1 Hz). Applied after the early-bubble rule. Default 0.}
 #'     \item{\code{min_diffusion_s}}{Shortest diffusion segment, in seconds. Default 20 (the
 #'       code archive's \code{length.min}); FluxSeparator needs more than 50 readings (Sø et al.
 #'       2024, p. 8).}
 #'   }
-#' @return A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\eqn{^{-1}}),
+#' @return A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (per second, in the unit of the
+#'   \code{ghg} column: ppm for CO2, ppb for LI-COR CH4/N2O), \code{slope_unit} (e.g.
+#'   \code{"ppb s-1"}, from the \code{<ghg>_unit} column that \code{tidy_ghg_analyzer()} adds;
+#'   \code{NA} without that column),
 #'   \code{r_square}, \code{correlation}, \code{b_param} (exponential curvature; \code{NA} for
 #'   linear/quadratic), \code{fit_used} (model actually used: \code{"linear"}, \code{"quadratic"},
 #'   or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}),
@@ -941,6 +953,10 @@ calculate_regression <- function(data, reference_df, ghg,
     filtered_data <- data[valid_rows & data$real_datetime >= start_time &
                             data$real_datetime <= end_time, ]
     sorted_data   <- filtered_data[order(filtered_data$real_datetime), ]
+    # concentration unit from tidy_ghg_analyzer()'s <ghg>_unit column, if any
+    u <- unique(stats::na.omit(sorted_data[[paste0(ghg, "_unit")]]))
+    if (length(u) > 1) stop("Mixed ", ghg, "_unit values for ", reference_site[i], ": ", paste(u, collapse = ", "))
+    slope_unit <- if (length(u) == 1) paste0(u, " s-1") else NA_character_
     if (anyDuplicated(sorted_data$real_datetime))
       warning("Duplicated timestamps for ", reference_site[i], ": does `data` hold more than one ",
               "analyzer? Pass one analyzer's readings per call.", call. = FALSE)
@@ -1103,6 +1119,7 @@ calculate_regression <- function(data, reference_df, ghg,
       start_time           = format(best_start_dt, "%Y/%m/%d %H:%M:%S"),
       end_time             = format(best_end_dt, "%Y/%m/%d %H:%M:%S"),
       slope                = best_slope,
+      slope_unit           = slope_unit,
       r_square             = best_r_square,
       correlation          = best_cor,
       b_param              = best_b_param,
@@ -1491,10 +1508,17 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #' @title calculate_ghg_flux
 #' @description Calculate the greenhouse gas (GHG) flux based on input parameters from a data frame.
 #' @param data A data frame containing relevant data with columns for slope, area, volume, and temperature.
-#' @param slope Name of the column in `data` that contains the slope values of the GHG concentration change (in ppm/s).
+#' @param slope Name of the column in `data` that contains the slope values of the GHG concentration change
+#'   (in ppm/s, or ppb/s with \code{conc_unit = "ppb"}).
 #' @param area Name of the column in `data` that contains the values of the area of the chamber (in square meter).
 #' @param volume Name of the column in `data` that contains values of the volume of the chamber (in litre).
 #' @param temp Name of the column in `data` that contains values of the temperature of the gas (in Celsius).
+#' @param conc_unit Unit of the concentration the slopes were fitted to: \code{"ppm"} (default) or
+#'   \code{"ppb"}. LI-COR CH4 and N2O from \code{tidy_ghg_analyzer()} are in ppb; \code{"ppb"} slopes
+#'   are divided by 1000 so the flux stays in mmol m-2 h-1. When \code{data} has a
+#'   \code{slope_unit} column (from \code{calculate_regression()} on \code{tidy_ghg_analyzer()}
+#'   data), it is used for each row and \code{conc_unit} only fills rows where it is \code{NA};
+#'   a \code{conc_unit} given explicitly that contradicts it is an error.
 #' @return \code{data} with \code{flux} and \code{unit} added. When \code{data} has
 #'   \code{slope_diffusion} and \code{slope_ebullition} (from
 #'   \code{calculate_regression(bubble_detection = TRUE)}), \code{flux_diffusion} and
@@ -1512,7 +1536,22 @@ plot_ghg_flux <- function(data, regression_result, ghg,
 #' print(results)
 #' @export
 
-calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "volume", temp = "temp") {
+calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "volume", temp = "temp",
+                               conc_unit = c("ppm", "ppb")) {
+
+  given <- !missing(conc_unit)
+  conc_unit <- match.arg(conc_unit)
+  unit_row <- rep(conc_unit, nrow(data))
+  if ("slope_unit" %in% names(data)) {  # from calculate_regression() via tidy_ghg_analyzer()
+    su <- sub(" s-1$", "", data$slope_unit)
+    bad <- setdiff(stats::na.omit(su), c("ppm", "ppb"))
+    if (length(bad)) stop("Unknown slope_unit: ", paste(bad, collapse = ", "))
+    if (given && any(!is.na(su) & su != conc_unit))
+      stop("conc_unit = \"", conc_unit, "\" contradicts the slope_unit column (",
+           paste(unique(stats::na.omit(data$slope_unit)), collapse = ", "), ").")
+    unit_row[!is.na(su)] <- su[!is.na(su)]
+  }
+  to_ppm <- ifelse(unit_row == "ppb", 0.001, 1)
 
   # Constants
   s_to_hr <- (1/3600)  # seconds to hours (3600 s h⁻¹)
@@ -1530,7 +1569,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   area <- data[[area]]
   volume <- data[[volume]]
   temp <- data[[temp]]
-  to_flux <- function(s) (s * volume * (1/s_to_hr) * micro_to_milli) /
+  to_flux <- function(s) (s * to_ppm * volume * (1/s_to_hr) * micro_to_milli) /
     (gas_constant * (temp + celsius_to_kelvin) * area)
 
   data$flux <- to_flux(data[[slope]])
@@ -1577,12 +1616,17 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   opt
 }
 
-# Bubble detection of Minaudo et al. (2026, p. 4): logical flag per reading.
-.find_ch4_bubbles <- function(conc, window = 10, align = "centre", prob = 0.75, min_thresh = 1e-4,
+# Bubble detection of Minaudo et al. (2026, p. 4): logical flag per reading; t in seconds from 0.
+# Run on readings linearly interpolated to a 1 s grid, as the code archive (find_bubbles.R,
+# lines 35-36), so window, merge_gap and min_len are seconds whatever the logging interval or gaps.
+.find_ch4_bubbles <- function(t, conc, window = 10, align = "centre", prob = 0.75, min_thresh = 1e-4,
                               merge_gap = 10, min_len = 5) {
+  grid <- seq(0, floor(max(t)))
+  at <- pmin(round(t), max(grid)) + 1  # grid point of each reading
+  conc <- stats::approx(t, conc, grid)$y
   n <- length(conc)
   flag <- rep(FALSE, n)
-  if (n < window + 1) return(flag)
+  if (n < window + 1) return(flag[at])
   z <- conc / mean(conc)
   first <- seq_len(n - window + 1)  # first reading of each window
   v <- vapply(first, function(s) stats::var(z[s:(s + window - 1)]), numeric(1))
@@ -1594,7 +1638,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   r <- rle(inverse.rle(r))
   r$values[r$values & r$lengths < min_len] <- FALSE
   flag[owner] <- inverse.rle(r)
-  flag
+  flag[at]
 }
 
 # Unflag bubbles whose rise is <= min_rise. Rise as FluxSeparator's ebullitive_flux() (Sø et al.
@@ -1677,7 +1721,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   if (length(time) < 20) return(out)
   tt <- time - time[1]
 
-  flag <- .find_ch4_bubbles(conc, opt$bubble_window, opt$bubble_align, opt$bubble_prob,
+  flag <- .find_ch4_bubbles(tt, conc, opt$bubble_window, opt$bubble_align, opt$bubble_prob,
                             merge_gap = opt$merge_gap, min_len = opt$min_len)
   out$n_bubbles <- sum(rle(flag)$values)
   no_bubble <- function(label) {
@@ -1703,7 +1747,8 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
     if (!any(flag)) return(no_bubble("no bubble: rises <= min_rise"))
   }
   if (opt$bubble_pad > 0) {
-    flag[pmin(length(flag), pmax(1, outer(which(flag), -opt$bubble_pad:opt$bubble_pad, "+")))] <- TRUE
+    ft <- tt[flag]  # pad in seconds
+    flag <- flag | vapply(tt, function(x) any(abs(x - ft) <= opt$bubble_pad), logical(1))
   }
 
   excl <- flag

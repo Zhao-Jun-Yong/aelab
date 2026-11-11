@@ -51,7 +51,7 @@ column, the per-row value (if not \code{NA}) overrides this global parameter for
 specific measurement. This allows different window lengths for individual chamber closures.}
 
 \item{num_rows}{The number of rows used per sliding regression window. Only used when
-\code{window_type = "sliding"}. Default 300.}
+\code{window_type = "sliding"}. Default 300 (5 min at 1 Hz; set it for your logging interval).}
 
 \item{fit_type}{Model used to fit the concentration curve. One of \code{"linear"} (default),
 \code{"quadratic"} (second-order polynomial; slope is the initial rate at t=0),
@@ -157,12 +157,15 @@ method of Minaudo et al. (2026, pp. 3-4, \doi{10.1002/lom3.70054}; code archive 
 \doi{10.5281/zenodo.18710431}). The split uses the readings of the closure's final window,
 (\code{window_type = "fixed"} only). Per closure:
 \itemize{
-  \item Bubbles: the concentration is divided by its mean, its variance is taken in a moving
-    window of readings, and readings whose variance is above a percentile of all variances
+  \item Bubbles: the readings are linearly interpolated to a 1 s grid (as the code archive,
+    \code{find_bubbles.R}, lines 35-36, so any logging interval and gaps are handled), the
+    concentration is divided by its mean, its variance is taken in a moving
+    window of seconds, and seconds whose variance is above a percentile of all variances
     (minimum 1e-4) are flagged; flagged segments close together are merged and short ones
-    dropped (Minaudo et al. 2026, p. 4). Because the variance is of the raw readings, a steep
-    clean rise (above about 0.3\% of the mean concentration per reading, e.g. 2 to 6 ppm in
-    300 s at 1 Hz) is itself flagged as bubbles; removing each window's trend first was tried
+    dropped (Minaudo et al. 2026, p. 4). A reading is flagged when its nearest second is.
+    Because the variance is not detrended, a steep
+    clean rise (above about 0.3\% of the mean concentration per second, e.g. 2 to 6 ppm in
+    300 s) is itself flagged as bubbles; removing each window's trend first was tried
     and also hid real bubbles, so such closures are left to review (\code{review_needed}).
   \item No bubble: \code{slope} is the regression slope, as with \code{bubble_detection = FALSE};
     total = diffusion = that slope, ebullition = 0.
@@ -181,28 +184,28 @@ method of Minaudo et al. (2026, pp. 3-4, \doi{10.1002/lom3.70054}; code archive 
 }}
 
 \item{ch4_options}{Only for \code{bubble_detection = TRUE} (always checked): a named list
-overriding any of the settings below. \code{bubble_window}, \code{merge_gap},
-\code{min_len} and \code{bubble_pad} count readings, \code{early_s} and
-\code{min_diffusion_s} are seconds: at 5 s sampling a 10-reading window spans 50 s. Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
+overriding any of the settings below. All lengths are seconds, whatever the
+logging interval (\code{bubble_window}, \code{merge_gap} and \code{min_len} on the 1 s grid;
+at 1 Hz without gaps a second is a reading). Defaults follow the paper text (Minaudo et al. 2026, pp. 3-4). Settings
 marked \emph{pending} are where the paper and its code archive differ or the paper is
 silent; they were asked of the author (2026-11-10) and the defaults may change.
 \describe{
-  \item{\code{bubble_window}}{Readings in the moving variance window. Default 10 (paper);
+  \item{\code{bubble_window}}{Seconds in the moving variance window. Default 10 (paper, 1 Hz);
     the code uses 11. \emph{Pending.}}
-  \item{\code{bubble_align}}{Which reading a window's variance belongs to: \code{"centre"}
-    (default; reading 6 of 10), \code{"start"} or \code{"end"}. The paper does not say.
-    \emph{Pending.} Readings that no window can own are never flagged: with
+  \item{\code{bubble_align}}{Which second a window's variance belongs to: \code{"centre"}
+    (default; second 6 of 10), \code{"start"} or \code{"end"}. The paper does not say.
+    \emph{Pending.} Seconds that no window can own are never flagged: with
     \code{"centre"} the first \code{bubble_window \%/\% 2} and the last
     \code{bubble_window - 1 - bubble_window \%/\% 2} (5 and 4 by default), so a bubble in
-    the last few readings is missed; with \code{"start"} the last, with \code{"end"} the first
+    the last few seconds is missed; with \code{"start"} the last, with \code{"end"} the first
     \code{bubble_window - 1}.}
   \item{\code{bubble_prob}}{Percentile of the variances above which readings are flagged.
     Default 0.75 (paper); the code uses 0.7. \emph{Pending.}}
-  \item{\code{merge_gap}}{Flagged segments separated by fewer than this many readings are
+  \item{\code{merge_gap}}{Flagged segments separated by fewer than this many seconds are
     merged. Default 10 (paper); the code also merges a gap of exactly 10 (\code{11}).
     \emph{Pending.}}
-  \item{\code{min_len}}{Flagged segments shorter than this many readings are dropped.
-    Default 5 (paper, a 5-reading segment is kept); the code drops it (\code{6}).
+  \item{\code{min_len}}{Flagged segments shorter than this many seconds are dropped.
+    Default 5 (paper, a 5 s segment is kept); the code drops it (\code{6}).
     \emph{Pending.}}
   \item{\code{early_s}, \code{early_from}}{A bubble starting within \code{early_s} seconds
     (default 20, paper) of \code{early_from} gives the total only. \code{"window"} (default)
@@ -231,16 +234,19 @@ silent; they were asked of the author (2026-11-10) and the defaults may change.
     its code, no value in the paper). Applied after the early-bubble rule, so it never
     changes an early-bubble closure; with no bubble left the closure is
     \code{"no bubble: rises <= min_rise"}. Default 0 (off).}
-  \item{\code{bubble_pad}}{Readings added before and after each flagged segment before the
+  \item{\code{bubble_pad}}{Seconds added before and after each flagged segment before the
     diffusion segment is searched, as FluxSeparator's \code{IndexSpan} (Sø et al. 2024, p. 5;
-    30 in its code). Applied after the early-bubble rule. Default 0.}
+    30 readings in its code, at 1 Hz). Applied after the early-bubble rule. Default 0.}
   \item{\code{min_diffusion_s}}{Shortest diffusion segment, in seconds. Default 20 (the
     code archive's \code{length.min}); FluxSeparator needs more than 50 readings (Sø et al.
     2024, p. 8).}
 }}
 }
 \value{
-A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (ppm s\eqn{^{-1}}),
+A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (per second, in the unit of the
+  \code{ghg} column: ppm for CO2, ppb for LI-COR CH4/N2O), \code{slope_unit} (e.g.
+  \code{"ppb s-1"}, from the \code{<ghg>_unit} column that \code{tidy_ghg_analyzer()} adds;
+  \code{NA} without that column),
   \code{r_square}, \code{correlation}, \code{b_param} (exponential curvature; \code{NA} for
   linear/quadratic), \code{fit_used} (model actually used: \code{"linear"}, \code{"quadratic"},
   or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}),

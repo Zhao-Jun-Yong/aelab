@@ -30,7 +30,9 @@ tidy_ghg_analyzer(
 \item{sec}{Second offset to correct the analyzer timestamp.}
 }
 \value{
-Return the loaded XLSX file after tidying. If any time offset is non-zero, a
+Return the loaded XLSX file after tidying, with one \code{<gas>_unit} column per gas
+  (\code{CO2_unit}, \code{CH4_unit}, \code{N2O_unit}: \code{"ppm"} or \code{"ppb"}), which
+  \code{calculate_regression()} turns into \code{slope_unit}. If any time offset is non-zero, a
   \code{real_datetime} column is added via \code{\link{convert_time}}.
 }
 \description{

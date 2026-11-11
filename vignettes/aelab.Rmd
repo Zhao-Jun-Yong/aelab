@@ -190,19 +190,20 @@ $$
 F = \frac{(S \times V \times c)}{R \times T \times A}
 $$
 
-where S is the slope obtained from the linear regression of GHG concentration changes over time (ppm s$^{-1}$), V is the chamber volume (liters), c is the conversion factor from seconds to hours, R is the ideal gas constant (0.082 L atm K$^{−1}$ mol$^{−1}$), T is the temperature inside the chamber (kelvin), and A is the surface area of the chamber (m$^2$).
+where S is the slope obtained from the linear regression of GHG concentration changes over time (ppm s$^{-1}$; ppb slopes such as LI-COR CH4 and N2O are divided by 1000, using the `slope_unit` column that `calculate_regression()` takes from `tidy_ghg_analyzer()` data, or `conc_unit = "ppb"` when there is no such column), V is the chamber volume (liters), c is the conversion factor from seconds to hours, R is the ideal gas constant (0.082 L atm K$^{−1}$ mol$^{−1}$), T is the temperature inside the chamber (kelvin), and A is the surface area of the chamber (m$^2$).
 
-Therefore, the function `calculate_ghg_flux()` requires a dataframe with columns for the slope, area, volume, and temperature. Note that the units of the parameters must match those described above, resulting in a flux with units of mmol m$^{-2}$ d$^{-1}$.
+Therefore, the function `calculate_ghg_flux()` requires a dataframe with columns for the slope, area, volume, and temperature. Note that the units of the parameters must match those described above, resulting in a flux with units of mmol m$^{-2}$ h$^{-1}$.
 
 ```{r}
 results_ch4 <- calculate_regression(ch4, ref_direct, ghg = "CH4", reference_time = "date_time",
                                     site = "site", analyzer_code = "1337")
 # In practice, filter to flag == "ok" before calculating flux
 flux_ch4 <- data.frame(
-    slope  = results_ch4$slope,
-    area   = 1, # in square meter
-    volume = 1, # in litre
-    temp   = 1) # in celsius
+    slope      = results_ch4$slope,
+    slope_unit = results_ch4$slope_unit, # "ppb s-1": LI-COR CH4, read by calculate_ghg_flux()
+    area       = 1, # in square meter
+    volume     = 1, # in litre
+    temp       = 1) # in celsius
 calculate_ghg_flux(flux_ch4)
 ```
 
@@ -235,7 +236,7 @@ dec <- data.frame(site = "P1", reference_time = format(t0, "%Y-%m-%d %H:%M:%S"),
 apply_ch4_review(reg, dec)[, c("slope", "slope_diffusion", "ch4_flag", "ch4_decision")]
 ```
 
-Three settings from FluxSeparator (Sø et al. 2024, *Journal of Geophysical Research: Biogeosciences* 129, e2024JG008035) are off by default: `min_rise` (a bubble must raise CH4 by more than this, in the unit of the concentration column; FluxSeparator uses 1 ppm), `bubble_pad` (readings added around each bubble before the diffusion search; FluxSeparator uses 30) and `min_diffusion_s` (shortest diffusion segment, default 20 s). Both bubble settings act after the early-bubble rule.
+Three settings from FluxSeparator (Sø et al. 2024, *Journal of Geophysical Research: Biogeosciences* 129, e2024JG008035) are off by default: `min_rise` (a bubble must raise CH4 by more than this, in the unit of the concentration column; FluxSeparator uses 1 ppm), `bubble_pad` (seconds added around each bubble before the diffusion search; FluxSeparator uses 30 readings at 1 Hz) and `min_diffusion_s` (shortest diffusion segment, default 20 s). Both bubble settings act after the early-bubble rule.
 
 ```{r}
 reg2 <- calculate_regression(readings, ref, "CH4", reference_time = "date_time", site = "site",
