@@ -1058,8 +1058,9 @@ test_that(".pareto_select_window bootstrap refits reuse the auto-resolved kmax, 
 test_that(".n_fit_params returns the correct parameter count per model family", {
   expect_equal(.n_fit_params("linear"), 2L)
   expect_equal(.n_fit_params("quadratic"), 3L)
-  expect_equal(.n_fit_params("exp_tz"), 3L)
-  expect_equal(.n_fit_params("exp_zhao18"), 4L)
+  expect_equal(.n_fit_params("exp_tz"), 4L)       # Cm, a, C0, b
+  expect_equal(.n_fit_params("exp_hm"), 3L)       # Cm, C0, b
+  expect_equal(.n_fit_params("exp_zhao18"), 4L)   # Cm, a, b, t0 (C0 fixed)
 })
 
 test_that(".dof_corrected_residuals applies the sqrt(n / (n - p)) correction", {

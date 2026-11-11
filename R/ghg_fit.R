@@ -196,17 +196,18 @@
   }
 
   stop(paste("Unknown fit_type:", fit_type,
-             ". Use 'linear', 'quadratic', 'exp_tz', 'exp_zhao18', or 'auto'."))
+             ". Use 'linear', 'quadratic', 'exp_tz', 'exp_zhao18', 'exp_hm', or 'auto'."))
 }
 
-# Internal helper: number of fitted parameters for each model family, used for the
-# degrees-of-freedom correction in .pareto_select_window()'s residual bootstrap. C0 (exp_tz) is
-# fixed from the data (not fit), so it does not count.
+# Internal helper: number of parameters fitted to the readings for each model, used for the minimum
+# readings of a fit, the AICc of fit_type = "auto" and the degrees-of-freedom correction in
+# .pareto_select_window()'s residual bootstrap. exp_tz: Cm, a, C0, b; exp_hm: Cm, C0, b;
+# exp_zhao18: Cm, a, b, t0 (C0 is fixed at the 15 s intercept).
 .n_fit_params <- function(fit_used) {
   switch(fit_used,
          linear     = 2L,
          quadratic  = 3L,
-         exp_tz     = 3L,
+         exp_tz     = 4L,
          exp_hm     = 3L,
          exp_zhao18 = 4L,
          2L)

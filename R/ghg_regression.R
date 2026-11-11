@@ -169,7 +169,7 @@ NULL
 #'   \eqn{C_m + (C_0 - C_m) e^{-b t}}{Cm + (C0 - Cm) exp(-b t)}, the \code{exp_tz} curve without its drift term, with
 #'   \code{C0} and \code{Cm} fitted and slope \eqn{b (C_m - C_0) e^{-b t_0}}{b (Cm - C0) exp(-b t0)}
 #'   (fluxible's \code{exp_hm}, Gaudard et al. 2025, which provides it for backwards compatibility; goFlux's HM fit
-#'   has the same form, Rheault et al. 2024). When the best \code{b} lies at the edge of its search range, or the fit does not
+#'   has the same form, Rheault et al. 2024); like theirs, it is fitted to all readings by least squares. When the best \code{b} lies at the edge of its search range, or the fit does not
 #'   depend on \code{b} (an exact line), the window has no usable curvature: an explicit exponential
 #'   \code{fit_type} gives an \code{NA} slope and flag \code{"no_data"}, and \code{"auto"} keeps the linear or
 #'   quadratic fit. A noisy straight line can still return an exponential slope; use \code{"auto"} when

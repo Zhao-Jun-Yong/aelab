@@ -21,11 +21,19 @@
 * `plot_ghg_flux()`: the panel title adds the model (closures without a bubble), `RMSE` and `n`; the
   default colour of the `zero` flag is `#6096BA` (was the yellow of `discard`).
 
+## `fit_type = "auto"`: parameter count of `exp_tz`
+
+* The AICc, the minimum number of readings and the pareto bootstrap's degrees-of-freedom correction counted
+  `exp_tz` as 3 fitted parameters; since `C0` is fitted it has 4 (`Cm`, `a`, `C0`, `b`). With the right
+  count `"auto"` needs a larger AICc gain to accept `exp_tz`, so a closure where it barely improved on the
+  linear fit now stays linear (1 of 6 synthetic test closures; the CarbonIMTA-based fixtures are unchanged).
+  Explicit `fit_type = "exp_tz"` is not affected.
+
 ## `exp_hm`
 
 * New `fit_type = "exp_hm"`: the Hutchinson-Mosier curve `Cm + (C0 - Cm) exp(-b t)` with slope
   `b (Cm - C0) exp(-b t0)` (fluxible's `exp_hm`, Gaudard et al. 2025; goFlux's HM fit has the same
-  form). `C0` and `Cm` are fitted. It is selected by name only; `"auto"` and `"pareto"` do not use it.
+  form), fitted to all readings by least squares. `C0` and `Cm` are fitted. It is selected by name only; `"auto"` and `"pareto"` do not use it.
   Without curvature it gives an `NA` slope, as `exp_tz`.
 
 # aelab 1.2.0
