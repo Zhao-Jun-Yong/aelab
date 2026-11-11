@@ -29,10 +29,14 @@
 #'   \code{slope_diffusion_se});
 #'   \code{flux} is then the total CH4 flux, because
 #'   \code{slope} holds the total slope for closures with a bubble.
+#' @references
+#' Rheault, K., Christiansen, J. R., & Larsen, K. S. (2024). goFlux: A user-friendly way to
+#' calculate GHG fluxes yourself, regardless of user experience. \emph{Journal of Open Source
+#' Software}, 9(96), 6393. \doi{10.21105/joss.06393}
 #' @examples
 #' data <- data.frame(
-#'   slope = c(1.2, 1.5, 1.1),
-#'   area = c(100, 150, 120),
+#'   slope = c(0.05, 0.08, 0.06),
+#'   area = c(0.10, 0.15, 0.12),
 #'   volume = c(10, 15, 12),
 #'   temp = c(25, 30, 22)
 #' )
