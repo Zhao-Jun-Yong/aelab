@@ -50,7 +50,7 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
       data$CO2 <- as.numeric(data$CO2)  # Convert CO2 to numeric
       data$H2O <- as.numeric(data$H2O)
       # Filter out rows with NaN values in CH4 and CO2
-      data <- dplyr::filter(data, CH4 != "NaN", CO2 != "NaN")
+      data <- dplyr::filter(data, !is.na(CH4), !is.na(CO2))
     } else if (gas == "n2o") {
       # Extract column titles for N2O data
       title <- data[5, 7:10]
@@ -61,7 +61,7 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
       data$N2O <- as.numeric(data$N2O)  # Convert N2O to numeric
       data$H2O <- as.numeric(data$H2O)
       # Filter out rows with NaN values in N2O
-      data <- dplyr::filter(data, N2O != "NaN")
+      data <- dplyr::filter(data, !is.na(N2O))
     }
 
     # Convert TIME and DATE columns to date-time format
@@ -1770,8 +1770,8 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   num("merge_gap", 0, whole = TRUE); num("min_len", 1, whole = TRUE); num("early_s", 0)
   num("spar", 0, lo_open = TRUE); num("nknots_ratio", 0, 1, lo_open = TRUE); num("min_rise", 0)
   num("bubble_pad", 0, whole = TRUE); num("min_diffusion_s", 0, lo_open = TRUE)
-  for (x in "trim_to_min")
-    if (!isTRUE(opt[[x]]) && !isFALSE(opt[[x]])) stop(x, " must be TRUE or FALSE.", call. = FALSE)
+  if (!isTRUE(opt$trim_to_min) && !isFALSE(opt$trim_to_min))
+    stop("trim_to_min must be TRUE or FALSE.", call. = FALSE)
   opt$bubble_align   <- match.arg(opt$bubble_align, c("centre", "start", "end"))
   opt$early_from     <- match.arg(opt$early_from, c("window", "placement"))
   opt$total_from     <- match.arg(opt$total_from, c("window", "segment"))
