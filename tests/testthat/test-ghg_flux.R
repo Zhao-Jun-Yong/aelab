@@ -60,7 +60,7 @@ test_that("calculate_regression returns correct results", {
   expect_true("analyzer" %in% colnames(result))
 })
 
-test_that("calculate_regression output includes flag and correlation columns", {
+test_quiet("calculate_regression output includes flag and correlation columns", {
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
                                by = "sec", length.out = 420),
@@ -77,7 +77,7 @@ test_that("calculate_regression output includes flag and correlation columns", {
   expect_true("correlation" %in% names(result))
 })
 
-test_that("calculate_regression slope is in ppm/s (elapsed seconds x-axis)", {
+test_quiet("calculate_regression slope is in ppm/s (elapsed seconds x-axis)", {
   elapsed <- seq(0, 419)
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
@@ -129,7 +129,7 @@ test_that("plot_ghg_flux draws fit_used, labels the unit and warns on no data", 
                  "no window")
 })
 
-test_that("calculate_regression flags clean linear signal as ok", {
+test_quiet("calculate_regression flags clean linear signal as ok", {
   elapsed <- seq(0, 419)
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
@@ -166,7 +166,7 @@ test_that("calculate_regression flags flat noisy signal as zero", {
   expect_lt(abs(result$correlation), 0.5)
 })
 
-test_that("instrument_precision marks below_mdf without overriding the flag", {
+test_quiet("instrument_precision marks below_mdf without overriding the flag", {
   elapsed <- seq(0, 419)
   # slope = 0.0001 ppm/s; min detectable = 0.1 ppm / 300 s ≈ 0.000333 ppm/s > 0.0001
   data <- data.frame(
@@ -315,7 +315,7 @@ test_that("calculate_regression returns no_data when window has insufficient row
   expect_equal(result$flag, "no_data")
 })
 
-test_that("calculate_regression quadratic fit returns initial slope (linear coefficient at t=0)", {
+test_quiet("calculate_regression quadratic fit returns initial slope (linear coefficient at t=0)", {
   elapsed <- seq(0, 419)
   # C(t) = 2 + 0.01*t + 0.00005*t²; initial slope (dC/dt at t=0) = 0.01
   data <- data.frame(
@@ -530,7 +530,7 @@ test_that("ch4_options min_rise, bubble_pad and min_diffusion_s", {
   expect_error(ch4_split(trace(100), min_diffusion_s = 0), "min_diffusion_s")
 })
 
-test_that("bubble_detection guards, new columns, plot and option checks", {
+test_quiet("bubble_detection guards, new columns, plot and option checks", {
   set.seed(1)
   trace <- 2 + 1e-4 * (0:299) + rnorm(300, 0, 2e-4) + 0.05 * (0:299 >= 100)
   t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
@@ -637,7 +637,7 @@ test_that("convert_ghg_unit throws error for invalid GHG", {
   expect_error(convert_ghg_unit(1, "invalid_gas"), "Invalid ghg")
 })
 
-test_that("g_factor is NA for explicit linear fit_type", {
+test_quiet("g_factor is NA for explicit linear fit_type", {
   elapsed <- seq(0, 419)
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
@@ -655,7 +655,7 @@ test_that("g_factor is NA for explicit linear fit_type", {
   expect_true(is.na(result$g_factor))
 })
 
-test_that("g_factor is NA when auto mode selects linear (no upgrade)", {
+test_quiet("g_factor is NA when auto mode selects linear (no upgrade)", {
   elapsed <- seq(0, 419)
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
@@ -675,7 +675,7 @@ test_that("g_factor is NA when auto mode selects linear (no upgrade)", {
   expect_true(is.na(result$g_factor))
 })
 
-test_that("g_factor is computed when auto mode selects quadratic", {
+test_quiet("g_factor is computed when auto mode selects quadratic", {
   elapsed <- seq(0, 419)
   # Decelerating rise: quadratic initial slope 0.03, lm slope ~0.0174 → g_factor ~1.72
   data <- data.frame(
@@ -719,7 +719,7 @@ test_that("auto mode keeps linear when the quadratic accelerates (Levy et al. 20
   expect_true(is.na(result$g_factor))
 })
 
-test_that("g_factor_threshold overrides ok to discard when ratio exceeds limit", {
+test_quiet("g_factor_threshold overrides ok to discard when ratio exceeds limit", {
   elapsed <- seq(0, 419)
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
@@ -753,7 +753,7 @@ test_that("g_factor_threshold overrides ok to discard when ratio exceeds limit",
   expect_equal(result_not_triggered$flag, "ok")     # g_factor ~1.72, threshold 2 does not
 })
 
-test_that("per-row duration_minutes overrides global parameter", {
+test_quiet("per-row duration_minutes overrides global parameter", {
   elapsed <- seq(0, 599)
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-01-01 10:00:00"),
@@ -1024,7 +1024,7 @@ test_that(".dof_corrected_residuals falls back to uncorrected (factor 1) residua
   expect_equal(.dof_corrected_residuals(resid, 4), resid)  # df < 0
 })
 
-test_that(".pareto_select_window bootstrap resamples from a small fixed residual pool, not fresh continuous noise", {
+test_quiet(".pareto_select_window bootstrap resamples from a small fixed residual pool, not fresh continuous noise", {
   # Spy on .fit_ghg_model: the first call for a single-candidate grid is the point-estimate fit,
   # every subsequent call is a bootstrap refit. Record the synthetic conc series each refit was
   # actually given, while still delegating to the real (unmocked) implementation so the candidate
@@ -1105,7 +1105,7 @@ test_that(".pareto_select_window candidate-admission floor is 4 points, not 3", 
   expect_equal(result_4$n_candidates, 1)
 })
 
-test_that("per-row start_offset_s overrides global parameter", {
+test_quiet("per-row start_offset_s overrides global parameter", {
   elapsed <- seq(0, 599)
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-01-01 10:00:00"),
