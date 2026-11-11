@@ -7,14 +7,16 @@ utils::globalVariables("line")  # plot_ghg_flux() aes column
 #'   \code{fit_used} column. For CH4 closures split with \code{bubble_detection = TRUE}, the solid
 #'   line is the linear diffusion fit over its segment (its colour is the diffusion fit's flag), the dashed white line is the two-point total
 #'   (Minaudo et al. 2026, Eq. 1, p. 3), readings flagged as bubbles are coral triangles, and the
-#'   panel title adds the total, diffusion and ebullition slopes and \code{ch4_flag}.
+#'   panel title adds the total, diffusion and ebullition slopes and \code{ch4_flag}. When the result has an
+#'   \code{rmse} column, the title also gives the RMSE (unit of the gas) and the number of readings
+#'   of the fit, and, for closures without a bubble, the model in \code{fit_used}.
 #' @param data Analyzer data processed by \code{tidy_ghg_analyzer()} and \code{convert_time()}.
 #' @param regression_result Output tibble from \code{calculate_regression()}.
 #' @param ghg Column name in \code{data} for the gas concentration (e.g. \code{"CH4"}, \code{"N2O"}).
 #' @param fit_type Model used for windows without a \code{fit_used} value (results from older
 #'   versions). One of \code{"linear"} (default), \code{"quadratic"}, \code{"exp_tz"},
-#'   \code{"exp_zhao18"}, \code{"auto"} (drawn as linear).
-#' @param t_zero Reference time in seconds for \code{"exp_tz"} slope. Default 0.
+#'   \code{"exp_zhao18"}, \code{"exp_hm"}, \code{"auto"} (drawn as linear).
+#' @param t_zero Reference time in seconds for the \code{"exp_tz"} and \code{"exp_hm"} slope. Default 0.
 #' @param flag_colors Named character vector mapping flag values to colors.
 #' @param second_gas Optional column name in \code{data} (e.g. \code{"CO2"}) drawn in a panel
 #'   beside each window, same time axis, readings only. A jump in both gases at once points to a
@@ -44,11 +46,11 @@ plot_ghg_flux <- function(data, regression_result, ghg,
                           fit_type = "linear", t_zero = 0,
                           flag_colors = c(ok      = "#8ab29a",
                                           discard = "#f2cc8f",
-                                          zero    = "#f2cc8f",
+                                          zero    = "#6096BA",
                                           no_data = "#aaaaaa"),
                           second_gas = NULL, base_size = 11) {
 
-  fit_type <- match.arg(fit_type, c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
+  fit_type <- match.arg(fit_type, c("linear", "quadratic", "exp_tz", "exp_zhao18", "exp_hm", "auto"))
   for (g in c(ghg, second_gas))
     if (!g %in% names(data)) stop("Column '", g, "' not found in data.")
 
@@ -76,10 +78,17 @@ plot_ghg_flux <- function(data, regression_result, ghg,
   # bubble closures: slope is the total, while R2 and flag describe the diffusion fit
   label_of <- function(row) {
     fit_lbl <- paste0("R\u00b2=", if (!is.na(row$r_square)) round(row$r_square, 3) else "NA", "  [", row$flag, "]")
-    if ("ch4_flag" %in% names(row) && !startsWith(row$ch4_flag, "no bubble"))
+    # RMSE (unit of the gas) and readings of the fit shown; older results have no rmse column
+    has_rmse <- "rmse" %in% names(row)
+    if ("ch4_flag" %in% names(row) && !startsWith(row$ch4_flag, "no bubble")) {
+      n_fit <- if ("n_obs_diffusion" %in% names(row)) row$n_obs_diffusion else NA
       return(paste0(row$site, "\ntotal=", num(row$slope_total), "  ebullition=", num(row$slope_ebullition),
-                    "\ndiffusion=", num(row$slope_diffusion), "  ", fit_lbl, "\n{", row$ch4_flag, "}"))
-    paste0(row$site, "\nslope=", num(row$slope, 5), "  ", fit_lbl)
+                    "\ndiffusion=", num(row$slope_diffusion), "  ", fit_lbl,
+                    if (has_rmse) paste0("\nRMSE=", num(row$rmse), "  n=", n_fit), "\n{", row$ch4_flag, "}"))
+    }
+    paste0(row$site, "\nslope=", num(row$slope, 5), "  ", fit_lbl,
+           if (has_rmse) paste0("\n", if ("fit_used" %in% names(row)) paste0(row$fit_used, "  "),
+                                "RMSE=", num(row$rmse), "  n=", row$n_obs))
   }
 
   # one panel per window and gas, keyed by row number (sites may share a label)
@@ -130,7 +139,7 @@ plot_ghg_flux <- function(data, regression_result, ghg,
     } else if (has_total(row)) {
       fitted <- rep(NA_real_, 200)  # total only: no diffusion line
     } else {
-      fitted <- .model_curve(if (model %in% c("quadratic", "exp_tz", "exp_zhao18")) model else "linear",
+      fitted <- .model_curve(if (model %in% c("quadratic", "exp_tz", "exp_zhao18", "exp_hm")) model else "linear",
                              conc_vec, elapsed_s, elapsed_seq)
     }
     lns[[length(lns) + 1]] <- data.frame(panel = pid, elapsed_s = elapsed_seq, fitted = fitted,

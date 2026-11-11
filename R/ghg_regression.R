@@ -89,9 +89,10 @@ NULL
 #' @param fit_type Model used to fit the concentration curve. One of \code{"linear"} (default),
 #'   \code{"quadratic"} (second-order polynomial; slope is the initial rate at t=0),
 #'   \code{"exp_tz"} (exponential with linear drift and user-specified \code{t_zero}),
-#'   \code{"exp_zhao18"} (exponential with linear drift and estimated t0), or
+#'   \code{"exp_zhao18"} (exponential with linear drift and estimated t0),
+#'   \code{"exp_hm"} (Hutchinson-Mosier exponential, no drift term; never chosen by \code{"auto"}), or
 #'   \code{"auto"} (automatic model selection). See section \emph{Fit types and QC}.
-#' @param t_zero Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.
+#' @param t_zero Reference time in seconds from window start for the \code{"exp_tz"} and \code{"exp_hm"} slope calculation. Default 0.
 #' @param window_type \code{"fixed"} (default), \code{"sliding"} or \code{"pareto"}; see section
 #'   \emph{Windows}. \code{bubble_detection = TRUE} needs \code{"fixed"}: the other two
 #'   pick the best-fitting stretch, which avoids the bubbles.
@@ -129,7 +130,7 @@ NULL
 #'   (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
 #'   fluxes permit more curvature and near-detection-limit measurements are kept linear.
 #' @param kappamax Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
-#'   Only applies when \code{fit_type} is \code{"exp_tz"} or \code{"exp_zhao18"}. When \eqn{b > \kappa_{max}},
+#'   Only applies when \code{fit_type} is \code{"exp_tz"}, \code{"exp_zhao18"} or \code{"exp_hm"}. When \eqn{b > \kappa_{max}},
 #'   the fit implies an implausibly fast equilibration and the slope is replaced by the linear
 #'   equivalent. Corresponds to the \emph{kappamax} quality criterion in Hueppi et al. (2018).
 #' @param g_factor_threshold Optional. Maximum acceptable ratio of the chosen model slope to the
@@ -164,7 +165,11 @@ NULL
 #'   \code{b} is found by a one-dimensional search, with \code{Cm} and \code{a} solved by least squares for
 #'   each \code{b}. \code{"exp_tz"} fits the initial concentration \code{C0} as well (Kutzbach et al.
 #'   2007); \code{"exp_zhao18"} fixes \code{C0} at the intercept of a linear fit over the first 15 s, as fluxible does
-#'   (with \code{C0} free its \code{t0} could not be estimated). When the best \code{b} lies at the edge of its search range, or the fit does not
+#'   (with \code{C0} free its \code{t0} could not be estimated). \code{"exp_hm"} is
+#'   \eqn{C_m + (C_0 - C_m) e^{-b t}}{Cm + (C0 - Cm) exp(-b t)}, the \code{exp_tz} curve without its drift term, with
+#'   \code{C0} and \code{Cm} fitted and slope \eqn{b (C_m - C_0) e^{-b t_0}}{b (Cm - C0) exp(-b t0)}
+#'   (fluxible's \code{exp_hm}, Gaudard et al. 2025, which provides it for backwards compatibility; goFlux's HM fit
+#'   has the same form, Rheault et al. 2024). When the best \code{b} lies at the edge of its search range, or the fit does not
 #'   depend on \code{b} (an exact line), the window has no usable curvature: an explicit exponential
 #'   \code{fit_type} gives an \code{NA} slope and flag \code{"no_data"}, and \code{"auto"} keeps the linear or
 #'   quadratic fit. A noisy straight line can still return an exponential slope; use \code{"auto"} when
@@ -233,12 +238,15 @@ NULL
 #' \tabular{ll}{
 #'   \code{start_time}, \code{end_time} \tab date-times in Asia/Taipei of the first and last reading in the fitted window \cr
 #'   \code{n_obs} \tab readings in the fitted window; for \code{"fixed"}, all readings in the window, also when below \code{min_obs} \cr
+#'   \code{data_ratio} \tab \code{n_obs} divided by the seconds of the window (the set window for \code{"fixed"}, first to last reading of the fit otherwise), as fluxible's data ratio (Gaudard et al. 2025); no threshold is applied \cr
 #'   \code{h2o_start} \tab first \code{H2O} reading of the closure, ppm; \code{NA} without an \code{H2O} column; for \code{calculate_ghg_flux(h2o = "h2o_start")} \cr
+#'   \code{start_conc} \tab mean of the first three readings of the closure (from the reference time), in the unit of the \code{ghg} column, as the readings fluxible's \code{start_error} check compares with the ambient concentration (Gaudard et al. 2025); no flag is set \cr
 #'   \code{slope} \tab per second, in the unit of the \code{ghg} column: ppm for CO2, ppb for LI-COR CH4/N2O \cr
+#'   \code{slope_se} \tab standard error of \code{slope} for a linear fit (\code{fit_used = "linear"}), same unit as \code{slope}, with the effective sample size n(1 - r1)/(1 + r1) in the residual variance because the OLS SE is biased for autocorrelated 1 Hz readings (Kutzbach et al. 2007, p. 1011; Santer et al. 2000, Eq. 6 and AdjSE, pp. 7343-7344); \code{NA} for the other models, when the effective sample size is <= 2, and when \code{slope} is the total of a closure with a bubble (see \code{slope_diffusion_se}) \cr
 #'   \code{slope_unit} \tab e.g. \code{"ppb s-1"}, from the \code{<ghg>_unit} column that \code{tidy_ghg_analyzer()} adds; \code{NA} without that column \cr
-#'   \code{r_square}, \code{correlation} \tab \code{r_square} is \code{NA} when nothing was fitted, e.g. \code{flag = "no_data"} \cr
+#'   \code{r_square}, \code{rmse}, \code{correlation} \tab \code{r_square} and \code{rmse} are \code{NA} when nothing was fitted, e.g. \code{flag = "no_data"}; \code{rmse} is the root mean square of the residuals of the fit in \code{fit_used} (dividing by the number of readings, as fluxible and goFlux), in the unit of the \code{ghg} column \cr
 #'   \code{b_param} \tab exponential curvature; \code{NA} for linear/quadratic \cr
-#'   \code{fit_used} \tab model actually used: \code{"linear"}, \code{"quadratic"}, or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}; \code{NA} when nothing was fitted, e.g. \code{flag = "no_data"} \cr
+#'   \code{fit_used} \tab model actually used: \code{"linear"}, \code{"quadratic"}, \code{"exp_tz"}, \code{"exp_zhao18"} or \code{"exp_hm"}; always matches \code{fit_type} unless \code{fit_type = "auto"}; \code{NA} when nothing was fitted, e.g. \code{flag = "no_data"} \cr
 #'   \code{g_factor} \tab ratio of chosen slope to linear baseline slope; \code{NA} when \code{fit_used = "linear"} or for explicit non-auto fits \cr
 #'   \code{flag} \tab \code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"} \cr
 #'   \code{below_mdf} \tab \code{TRUE} when the slope is below the minimum detectable slope; \code{NA} without \code{instrument_precision} \cr
@@ -257,7 +265,7 @@ NULL
 #'
 #' \tabular{ll}{
 #'   \code{slope_source} \tab \code{"total"} when \code{slope} is \code{slope_total}, \code{"regression"} when it is \code{slope_regression} \cr
-#'   \code{slope_regression}, \code{r_square_regression}, \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression}, \code{below_mdf_regression} \tab the regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}} \cr
+#'   \code{slope_regression}, \code{r_square_regression}, \code{rmse_regression}, \code{slope_se_regression}, \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression}, \code{below_mdf_regression} \tab the regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}} \cr
 #'   \code{slope_total} \tab total slope \cr
 #'   \code{slope_diffusion} \tab diffusion slope \cr
 #'   \code{slope_diffusion_se} \tab its standard error, with the effective sample size n(1 - r1)/(1 + r1) in the residual variance, because the OLS SE is biased for autocorrelated 1 Hz readings (Kutzbach et al. 2007, p. 1011; Santer et al. 2000, Eq. 6 and AdjSE, pp. 7343-7344); \code{NA} without a bubble or when the effective sample size is <= 2, which then gets the label \code{"ebullition < diffusion + SE"} \cr
@@ -273,7 +281,7 @@ NULL
 #' }
 #'
 #' For closures with a bubble, \code{slope} is
-#' \code{slope_total} and \code{below_mdf} is for the total, while \code{r_square},
+#' \code{slope_total} and \code{below_mdf} is for the total, while \code{r_square}, \code{rmse},
 #' \code{correlation} and \code{flag} (same thresholds) are for the linear diffusion fit (the
 #' R\eqn{^2} and correlation tests are for a straight line, not for the two-point total). With no
 #' diffusion fit (\code{"early bubble: total only"}, or \code{"no linear diffusion segment"}
@@ -392,7 +400,7 @@ calculate_regression <- function(data, reference_df, ghg,
                                  min_window_size = 60, cutoff_step = 10, n_boot = 200,
                                  bubble_detection = FALSE, ch4_options = list(), min_obs = 60) {
 
-  fit_type    <- match.arg(fit_type,    c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
+  fit_type    <- match.arg(fit_type,    c("linear", "quadratic", "exp_tz", "exp_zhao18", "exp_hm", "auto"))
   window_type <- match.arg(window_type, c("sliding", "fixed", "pareto"))
   chk <- .check_regression_inputs(data, reference_df, ghg, reference_time, site, analyzer_code,
                                   fit_type, window_type, bubble_detection, ch4_options, min_obs,
@@ -482,18 +490,28 @@ calculate_regression <- function(data, reference_df, ghg,
       m <- .merge_ch4_split(sorted_data, ghg, ch4_opt, reference_datetime, fit, flag, g_factor,
                             below_mdf, instrument_precision, cor_threshold, r2_threshold)
       split <- m$split; reg_qc <- m$reg_qc
-      fit$slope <- m$slope; fit$r_square <- m$r_square; fit$cor <- m$cor
+      fit$slope <- m$slope; fit$slope_se <- m$slope_se; fit$r_square <- m$r_square
+      fit$rmse <- m$rmse; fit$cor <- m$cor
       flag <- m$flag; g_factor <- m$g_factor; below_mdf <- m$below_mdf
     }
+
+    # readings per second of the window (fluxible's data ratio): the set window for "fixed", else
+    # first to last reading of the fit
+    win_s <- if (window_type == "fixed") as.numeric(dur_min_i) * 60 else
+      as.numeric(difftime(fit$end_dt, fit$start_dt, units = "secs"))
 
     out <- tibble(
       start_time           = .taipei_time(fit$start_dt),
       end_time             = .taipei_time(fit$end_dt),
       n_obs                = fit$n_obs,
+      data_ratio           = if (isTRUE(win_s > 0)) fit$n_obs / win_s else NA_real_,
       h2o_start            = cl$h2o_start,
+      start_conc           = cl$start_conc,
       slope                = fit$slope,
+      slope_se             = if (no_fit) NA_real_ else fit$slope_se,
       slope_unit           = cl$slope_unit,
       r_square             = if (no_fit) NA_real_ else fit$r_square,
+      rmse                 = if (no_fit) NA_real_ else fit$rmse,
       correlation          = fit$cor,
       b_param              = fit$b_param,
       fit_used             = if (no_fit) NA_character_ else fit$fit_used,
@@ -514,6 +532,8 @@ calculate_regression <- function(data, reference_df, ghg,
         slope_source = if (startsWith(split$ch4_flag, "no bubble") || is.na(split$total)) "regression" else "total",
         slope_regression = split$regression,
         r_square_regression = if (no_fit) NA_real_ else reg_qc$r_square,
+        rmse_regression = if (no_fit) NA_real_ else reg_qc$rmse,
+        slope_se_regression = if (no_fit) NA_real_ else reg_qc$slope_se,
         correlation_regression = reg_qc$correlation, flag_regression = reg_qc$flag,
         g_factor_regression = reg_qc$g_factor, below_mdf_regression = reg_qc$below_mdf,
         slope_total = split$total,
@@ -609,7 +629,9 @@ calculate_regression <- function(data, reference_df, ghg,
             call. = FALSE)
   list(sorted = sorted_data,
        slope_unit = if (length(u) == 1) paste0(u, " s-1") else NA_character_,
-       h2o_start = if (length(h2o)) h2o[1] else NA_real_)
+       h2o_start = if (length(h2o)) h2o[1] else NA_real_,
+       # mean of the first 3 readings of the closure, as fluxible's start_error check
+       start_conc = if (nrow(sorted_data)) mean(utils::head(as.numeric(sorted_data[[ghg]]), 3)) else NA_real_)
 }
 
 # What a window method returns: the chosen fit and window of one closure. The defaults describe
@@ -617,7 +639,7 @@ calculate_regression <- function(data, reference_df, ghg,
 # "fixed" and "sliding".
 .empty_window_fit <- function(fit_type) {
   no_time <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
-  list(r_square = -Inf, slope = NA_real_, slope_lm = NA_real_, cor = NA_real_, b_param = NA_real_,
+  list(r_square = -Inf, rmse = NA_real_, slope = NA_real_, slope_se = NA_real_, slope_lm = NA_real_, cor = NA_real_, b_param = NA_real_,
        fit_used = fit_type, start_dt = no_time, end_dt = no_time, deadband = NA_real_,
        cutoff = NA_real_, uncertainty_lo = NA_real_, uncertainty_hi = NA_real_,
        n_candidates = NA_integer_, force_discard = FALSE, n_obs = 0L)
@@ -628,7 +650,8 @@ calculate_regression <- function(data, reference_df, ghg,
   elapsed_s <- as.numeric(difftime(selected$real_datetime, selected$real_datetime[1], units = "secs"))
   conc_vec  <- as.numeric(selected[[ghg]])
   fit_out   <- .fit_ghg_model(conc_vec, elapsed_s, fit_type, t_zero, kappamax, instrument_precision)
-  list(r_square = fit_out$r_square, slope = fit_out$slope,
+  list(r_square = fit_out$r_square, rmse = .rmse(fit_out$residuals), slope = fit_out$slope,
+       slope_se = if (!is.null(fit_out$slope_se)) fit_out$slope_se else NA_real_,  # linear fits only
        slope_lm = if (!is.null(fit_out$slope_lm)) fit_out$slope_lm else NA_real_,
        b_param = fit_out$b_param, fit_used = fit_out$fit_used,
        cor = if (!is.na(fit_out$r_square)) stats::cor(conc_vec, elapsed_s) else NA_real_,
@@ -676,9 +699,9 @@ calculate_regression <- function(data, reference_df, ghg,
     fit$force_discard <- TRUE
   } else if (identical(pw$status, "selected")) {
     sel <- pw$selected
-    fit[c("r_square", "slope", "slope_lm", "b_param", "fit_used", "cor", "start_dt", "end_dt",
+    fit[c("r_square", "rmse", "slope", "slope_se", "slope_lm", "b_param", "fit_used", "cor", "start_dt", "end_dt",
           "deadband", "cutoff", "uncertainty_lo", "uncertainty_hi")] <-
-      sel[c("r_square", "slope", "slope_lm", "b_param", "fit_used", "cor", "start_dt", "end_dt",
+      sel[c("r_square", "rmse", "slope", "slope_se", "slope_lm", "b_param", "fit_used", "cor", "start_dt", "end_dt",
             "deadband", "cutoff", "uncertainty_lo", "uncertainty_hi")]
   }
   # status == "no_grid" (too little data): the defaults stay, as "fixed"/"sliding" fall through
@@ -710,27 +733,30 @@ calculate_regression <- function(data, reference_df, ghg,
   split <- .separate_ch4(as.numeric(win$real_datetime), as.numeric(win[[ghg]]), ch4_opt,
                          as.numeric(reference_datetime))
   split$regression <- fit$slope
-  reg_qc <- list(r_square = fit$r_square, correlation = fit$cor, flag = flag, g_factor = g_factor,
-                 below_mdf = below_mdf)
-  slope <- fit$slope; r_square <- fit$r_square; cor <- fit$cor
+  reg_qc <- list(r_square = fit$r_square, rmse = fit$rmse, slope_se = fit$slope_se, correlation = fit$cor,
+                 flag = flag, g_factor = g_factor, below_mdf = below_mdf)
+  slope <- fit$slope; r_square <- fit$r_square; cor <- fit$cor; rmse <- fit$rmse
+  slope_se <- fit$slope_se
   if (startsWith(split$ch4_flag, "no bubble")) {
     split$total <- split$diffusion <- slope  # keep the regression's own fit
     split$diff_start <- as.numeric(fit$start_dt)
     split$diff_end <- as.numeric(fit$end_dt)
   } else if (!is.na(split$total)) {
     slope <- split$total
+    slope_se <- NA_real_  # the regression's, not the total's; see slope_diffusion_se
     g_factor <- NA_real_  # describes the regression curve, no longer the reported slope
     # flag, r_square and correlation always describe the diffusion line; NA when there is
     # none (total only), the regression's stay in *_regression
     if (flag != "no_data") {
       r_square <- split$diff_r2
+      rmse <- split$diff_rmse
       cor <- split$diff_cor
       flag <- if (is.na(split$diff_r2)) NA_character_ else .qc_flag(cor, r_square, cor_threshold, r2_threshold)
     }
     if (!is.null(instrument_precision)) below_mdf <- .below_mdf(slope, split$total_s, instrument_precision)
   }
-  list(split = split, reg_qc = reg_qc, slope = slope, r_square = r_square, cor = cor, flag = flag,
-       g_factor = g_factor, below_mdf = below_mdf)
+  list(split = split, reg_qc = reg_qc, slope = slope, slope_se = slope_se, r_square = r_square,
+       rmse = rmse, cor = cor, flag = flag, g_factor = g_factor, below_mdf = below_mdf)
 }
 
 #' @title apply_ch4_review
@@ -742,13 +768,15 @@ calculate_regression <- function(data, reference_df, ghg,
 #'   \describe{
 #'     \item{\code{"accept"}}{Keep the split as it is.}
 #'     \item{\code{"total"}}{Total only: \code{slope} is \code{slope_total}; diffusion and
-#'       ebullition are \code{NA}, and so are \code{r_square}, \code{correlation} and
-#'       \code{flag} (they described the diffusion line), as for an automatic total-only closure.}
+#'       ebullition are \code{NA}, and so are \code{r_square}, \code{rmse}, \code{slope_se}, \code{correlation},
+#'       \code{flag} and \code{n_obs_diffusion} (they described the diffusion line), as for an
+#'       automatic total-only closure.}
 #'     \item{\code{"not_bubble"}}{Use the regression fit as for a closure without a bubble:
-#'       \code{slope}, \code{r_square}, \code{correlation}, \code{flag}, \code{g_factor} and
+#'       \code{slope}, \code{slope_se}, \code{r_square}, \code{rmse}, \code{correlation}, \code{flag}, \code{g_factor} and
 #'       \code{below_mdf} come
 #'       from the \code{*_regression} columns, total = diffusion = \code{slope_regression},
-#'       ebullition = 0, and the diffusion segment is the whole window.}
+#'       ebullition = 0, and the diffusion segment is the whole window (\code{n_obs_diffusion}
+#'       is \code{n_obs}).}
 #'     \item{\code{"discard"}}{\code{flag} is \code{"discard"}; values are kept.}
 #'   }
 #'   Other columns (e.g. a note) are ignored. To rerun a closure with other \code{ch4_options},
@@ -792,17 +820,23 @@ apply_ch4_review <- function(regression_result, decisions, by = c("site", "refer
 
   tot <- d %in% "total"
   reg$slope[tot] <- reg$slope_total[tot]
-  for (x in c("r_square", "correlation", "flag")) reg[[x]][tot] <- NA
+  for (x in intersect(c("r_square", "rmse", "slope_se", "correlation", "flag"), names(reg))) reg[[x]][tot] <- NA
   reg[tot, intersect(c("slope_diffusion", "slope_diffusion_se", "diffusion_r1",
                        "slope_ebullition"), names(reg))] <- NA_real_
   nb <- d %in% "not_bubble"
-  for (x in c("r_square", "correlation", "flag", "g_factor", "below_mdf")) reg[[x]][nb] <- reg[[paste0(x, "_regression")]][nb]
+  for (x in c("r_square", "rmse", "slope_se", "correlation", "flag", "g_factor", "below_mdf")) {
+    if (paste0(x, "_regression") %in% names(reg)) reg[[x]][nb] <- reg[[paste0(x, "_regression")]][nb]
+  }
   reg$slope[nb] <- reg$slope_total[nb] <- reg$slope_diffusion[nb] <- reg$slope_regression[nb]
   reg$slope_ebullition[nb] <- 0
   reg$slope_diffusion_se[nb] <- NA_real_
   for (x in intersect("diffusion_r1", names(reg))) reg[[x]][nb] <- NA_real_
   reg$diffusion_start[nb] <- reg$start_time[nb]
   reg$diffusion_end[nb] <- reg$end_time[nb]
+  if ("n_obs_diffusion" %in% names(reg)) {
+    reg$n_obs_diffusion[tot] <- NA_integer_
+    reg$n_obs_diffusion[nb] <- reg$n_obs[nb]
+  }
   reg$slope_source[tot] <- "total"
   reg$slope_source[nb] <- "regression"
   reg$flag[d %in% "discard"] <- "discard"

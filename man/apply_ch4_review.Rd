@@ -17,13 +17,15 @@ apply_ch4_review(
 \describe{
   \item{\code{"accept"}}{Keep the split as it is.}
   \item{\code{"total"}}{Total only: \code{slope} is \code{slope_total}; diffusion and
-    ebullition are \code{NA}, and so are \code{r_square}, \code{correlation} and
-    \code{flag} (they described the diffusion line), as for an automatic total-only closure.}
+    ebullition are \code{NA}, and so are \code{r_square}, \code{rmse}, \code{slope_se}, \code{correlation},
+    \code{flag} and \code{n_obs_diffusion} (they described the diffusion line), as for an
+    automatic total-only closure.}
   \item{\code{"not_bubble"}}{Use the regression fit as for a closure without a bubble:
-    \code{slope}, \code{r_square}, \code{correlation}, \code{flag}, \code{g_factor} and
+    \code{slope}, \code{slope_se}, \code{r_square}, \code{rmse}, \code{correlation}, \code{flag}, \code{g_factor} and
     \code{below_mdf} come
     from the \code{*_regression} columns, total = diffusion = \code{slope_regression},
-    ebullition = 0, and the diffusion segment is the whole window.}
+    ebullition = 0, and the diffusion segment is the whole window (\code{n_obs_diffusion}
+    is \code{n_obs}).}
   \item{\code{"discard"}}{\code{flag} is \code{"discard"}; values are kept.}
 }
 Other columns (e.g. a note) are ignored. To rerun a closure with other \code{ch4_options},

@@ -22,7 +22,8 @@
 #'   and some of those rows have no decision (\code{ch4_decision} is \code{"unreviewed"} or missing, see
 #'   \code{\link{apply_ch4_review}}), a warning gives their number; the flux is still calculated for them
 #'   from the unreviewed split.
-#' @return \code{data} with \code{flux} and \code{unit} added. When \code{data} has
+#' @return \code{data} with \code{flux} and \code{unit} added, and \code{flux_se} when \code{data} has
+#'   \code{slope_se} (the SE of \code{slope} from \code{calculate_regression()}, converted like the slope). When \code{data} has
 #'   \code{slope_diffusion} and \code{slope_ebullition} (from
 #'   \code{calculate_regression(bubble_detection = TRUE)}), \code{flux_diffusion} and
 #'   \code{flux_ebullition} are added too (and \code{flux_diffusion_se} from
@@ -94,7 +95,7 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 
   data$flux <- to_flux(data[[slope]])
   # CH4 split from calculate_regression(bubble_detection = TRUE)
-  for (part in c("diffusion", "diffusion_se", "ebullition")) {
+  for (part in c("se", "diffusion", "diffusion_se", "ebullition")) {
     if (paste0("slope_", part) %in% names(data)) data[[paste0("flux_", part)]] <- to_flux(data[[paste0("slope_", part)]])
   }
 

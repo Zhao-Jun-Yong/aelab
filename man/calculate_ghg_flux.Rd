@@ -43,7 +43,8 @@ moles of dry air, V P (1 - H2O) / (R T A), as goFlux's \code{flux.term()} (Rheau
 2024), because LI-7810/7820 report dry mole fractions (LI-COR output tables).}
 }
 \value{
-\code{data} with \code{flux} and \code{unit} added. When \code{data} has
+\code{data} with \code{flux} and \code{unit} added, and \code{flux_se} when \code{data} has
+  \code{slope_se} (the SE of \code{slope} from \code{calculate_regression()}, converted like the slope). When \code{data} has
   \code{slope_diffusion} and \code{slope_ebullition} (from
   \code{calculate_regression(bubble_detection = TRUE)}), \code{flux_diffusion} and
   \code{flux_ebullition} are added too (and \code{flux_diffusion_se} from

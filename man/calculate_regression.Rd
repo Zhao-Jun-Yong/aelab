@@ -61,10 +61,11 @@ specific measurement. This allows different window lengths for individual chambe
 \item{fit_type}{Model used to fit the concentration curve. One of \code{"linear"} (default),
 \code{"quadratic"} (second-order polynomial; slope is the initial rate at t=0),
 \code{"exp_tz"} (exponential with linear drift and user-specified \code{t_zero}),
-\code{"exp_zhao18"} (exponential with linear drift and estimated t0), or
+\code{"exp_zhao18"} (exponential with linear drift and estimated t0),
+\code{"exp_hm"} (Hutchinson-Mosier exponential, no drift term; never chosen by \code{"auto"}), or
 \code{"auto"} (automatic model selection). See section \emph{Fit types and QC}.}
 
-\item{t_zero}{Reference time in seconds from window start for the \code{"exp_tz"} slope calculation. Default 0.}
+\item{t_zero}{Reference time in seconds from window start for the \code{"exp_tz"} and \code{"exp_hm"} slope calculation. Default 0.}
 
 \item{window_type}{\code{"fixed"} (default), \code{"sliding"} or \code{"pareto"}; see section
 \emph{Windows}. \code{bubble_detection = TRUE} needs \code{"fixed"}: the other two
@@ -90,7 +91,7 @@ low fluxes with a good fit are kept (Gaudard et al. 2025; Maier et al. 2022); (2
 fluxes permit more curvature and near-detection-limit measurements are kept linear.}
 
 \item{kappamax}{Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
-Only applies when \code{fit_type} is \code{"exp_tz"} or \code{"exp_zhao18"}. When \eqn{b > \kappa_{max}},
+Only applies when \code{fit_type} is \code{"exp_tz"}, \code{"exp_zhao18"} or \code{"exp_hm"}. When \eqn{b > \kappa_{max}},
 the fit implies an implausibly fast equilibration and the slope is replaced by the linear
 equivalent. Corresponds to the \emph{kappamax} quality criterion in Hueppi et al. (2018).}
 
@@ -158,7 +159,11 @@ when it levels off and its curvature parameter does not exceed \code{kappamax}. 
   \code{b} is found by a one-dimensional search, with \code{Cm} and \code{a} solved by least squares for
   each \code{b}. \code{"exp_tz"} fits the initial concentration \code{C0} as well (Kutzbach et al.
   2007); \code{"exp_zhao18"} fixes \code{C0} at the intercept of a linear fit over the first 15 s, as fluxible does
-  (with \code{C0} free its \code{t0} could not be estimated). When the best \code{b} lies at the edge of its search range, or the fit does not
+  (with \code{C0} free its \code{t0} could not be estimated). \code{"exp_hm"} is
+  \eqn{C_m + (C_0 - C_m) e^{-b t}}{Cm + (C0 - Cm) exp(-b t)}, the \code{exp_tz} curve without its drift term, with
+  \code{C0} and \code{Cm} fitted and slope \eqn{b (C_m - C_0) e^{-b t_0}}{b (Cm - C0) exp(-b t0)}
+  (fluxible's \code{exp_hm}, Gaudard et al. 2025, which provides it for backwards compatibility; goFlux's HM fit
+  has the same form, Rheault et al. 2024). When the best \code{b} lies at the edge of its search range, or the fit does not
   depend on \code{b} (an exact line), the window has no usable curvature: an explicit exponential
   \code{fit_type} gives an \code{NA} slope and flag \code{"no_data"}, and \code{"auto"} keeps the linear or
   quadratic fit. A noisy straight line can still return an exponential slope; use \code{"auto"} when
@@ -233,12 +238,15 @@ A tibble with these columns.
 \tabular{ll}{
   \code{start_time}, \code{end_time} \tab date-times in Asia/Taipei of the first and last reading in the fitted window \cr
   \code{n_obs} \tab readings in the fitted window; for \code{"fixed"}, all readings in the window, also when below \code{min_obs} \cr
+  \code{data_ratio} \tab \code{n_obs} divided by the seconds of the window (the set window for \code{"fixed"}, first to last reading of the fit otherwise), as fluxible's data ratio (Gaudard et al. 2025); no threshold is applied \cr
   \code{h2o_start} \tab first \code{H2O} reading of the closure, ppm; \code{NA} without an \code{H2O} column; for \code{calculate_ghg_flux(h2o = "h2o_start")} \cr
+  \code{start_conc} \tab mean of the first three readings of the closure (from the reference time), in the unit of the \code{ghg} column, as the readings fluxible's \code{start_error} check compares with the ambient concentration (Gaudard et al. 2025); no flag is set \cr
   \code{slope} \tab per second, in the unit of the \code{ghg} column: ppm for CO2, ppb for LI-COR CH4/N2O \cr
+  \code{slope_se} \tab standard error of \code{slope} for a linear fit (\code{fit_used = "linear"}), same unit as \code{slope}, with the effective sample size n(1 - r1)/(1 + r1) in the residual variance because the OLS SE is biased for autocorrelated 1 Hz readings (Kutzbach et al. 2007, p. 1011; Santer et al. 2000, Eq. 6 and AdjSE, pp. 7343-7344); \code{NA} for the other models, when the effective sample size is <= 2, and when \code{slope} is the total of a closure with a bubble (see \code{slope_diffusion_se}) \cr
   \code{slope_unit} \tab e.g. \code{"ppb s-1"}, from the \code{<ghg>_unit} column that \code{tidy_ghg_analyzer()} adds; \code{NA} without that column \cr
-  \code{r_square}, \code{correlation} \tab \code{r_square} is \code{NA} when nothing was fitted, e.g. \code{flag = "no_data"} \cr
+  \code{r_square}, \code{rmse}, \code{correlation} \tab \code{r_square} and \code{rmse} are \code{NA} when nothing was fitted, e.g. \code{flag = "no_data"}; \code{rmse} is the root mean square of the residuals of the fit in \code{fit_used} (dividing by the number of readings, as fluxible and goFlux), in the unit of the \code{ghg} column \cr
   \code{b_param} \tab exponential curvature; \code{NA} for linear/quadratic \cr
-  \code{fit_used} \tab model actually used: \code{"linear"}, \code{"quadratic"}, or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}; \code{NA} when nothing was fitted, e.g. \code{flag = "no_data"} \cr
+  \code{fit_used} \tab model actually used: \code{"linear"}, \code{"quadratic"}, \code{"exp_tz"}, \code{"exp_zhao18"} or \code{"exp_hm"}; always matches \code{fit_type} unless \code{fit_type = "auto"}; \code{NA} when nothing was fitted, e.g. \code{flag = "no_data"} \cr
   \code{g_factor} \tab ratio of chosen slope to linear baseline slope; \code{NA} when \code{fit_used = "linear"} or for explicit non-auto fits \cr
   \code{flag} \tab \code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"} \cr
   \code{below_mdf} \tab \code{TRUE} when the slope is below the minimum detectable slope; \code{NA} without \code{instrument_precision} \cr
@@ -257,7 +265,7 @@ Only with \code{bubble_detection = TRUE} are there also:
 
 \tabular{ll}{
   \code{slope_source} \tab \code{"total"} when \code{slope} is \code{slope_total}, \code{"regression"} when it is \code{slope_regression} \cr
-  \code{slope_regression}, \code{r_square_regression}, \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression}, \code{below_mdf_regression} \tab the regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}} \cr
+  \code{slope_regression}, \code{r_square_regression}, \code{rmse_regression}, \code{slope_se_regression}, \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression}, \code{below_mdf_regression} \tab the regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}} \cr
   \code{slope_total} \tab total slope \cr
   \code{slope_diffusion} \tab diffusion slope \cr
   \code{slope_diffusion_se} \tab its standard error, with the effective sample size n(1 - r1)/(1 + r1) in the residual variance, because the OLS SE is biased for autocorrelated 1 Hz readings (Kutzbach et al. 2007, p. 1011; Santer et al. 2000, Eq. 6 and AdjSE, pp. 7343-7344); \code{NA} without a bubble or when the effective sample size is <= 2, which then gets the label \code{"ebullition < diffusion + SE"} \cr
@@ -273,7 +281,7 @@ Only with \code{bubble_detection = TRUE} are there also:
 }
 
 For closures with a bubble, \code{slope} is
-\code{slope_total} and \code{below_mdf} is for the total, while \code{r_square},
+\code{slope_total} and \code{below_mdf} is for the total, while \code{r_square}, \code{rmse},
 \code{correlation} and \code{flag} (same thresholds) are for the linear diffusion fit (the
 R\eqn{^2} and correlation tests are for a straight line, not for the two-point total). With no
 diffusion fit (\code{"early bubble: total only"}, or \code{"no linear diffusion segment"}

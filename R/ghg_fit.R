@@ -8,7 +8,9 @@
 # Cm and the model reduces to exp_tz, so C0 is fixed at fluxible's 15 s intercept instead.
 # A best b at the edge of the search range [0.05, 50] / window length means the window has no
 # usable curvature (linear, flat or a step): NULL, so the caller reports NA or skips the model.
-.exp_curve_fit <- function(conc, elapsed_s, zhao = FALSE) {
+# hm = TRUE: the Hutchinson-Mosier curve Cm + (C0 - Cm) exp(-b t), i.e. exp_tz without the drift
+# term a (a = 0); C0 and Cm free, as fluxible's exp_hm (Gaudard et al. 2025) and goFlux's HM fit.
+.exp_curve_fit <- function(conc, elapsed_s, zhao = FALSE, hm = FALSE) {
   # exp_zhao18 only: C0 = intercept of a linear fit over the first 15 s (fluxible cz_window;
   # Gaudard et al. 2025, SI pp. 29-30); the first reading if fewer than 3 readings fall there
   first  <- elapsed_s - min(elapsed_s) <= 15
@@ -22,7 +24,7 @@
     if (!all(is.finite(e))) return(NULL)
     # exp_tz: conc = Cm + a u + (C0 - Cm) e; exp_zhao18: conc - C0 e = Cm (1 - e) + a u
     f <- if (zhao) stats::lm.fit(cbind(1 - e, u), conc - C0 * e) else
-      stats::lm.fit(cbind(1, u, e), conc)
+      if (hm) stats::lm.fit(cbind(1, e), conc) else stats::lm.fit(cbind(1, u, e), conc)
     if (anyNA(f$coefficients)) NULL else f
   }
   .rss <- function(p) {
@@ -46,8 +48,8 @@
   f <- .solve(lb, t0)
   if (is.null(f)) return(NULL)
   cf <- f$coefficients
-  list(Cm = cf[[1]], a = cf[[2]], b = exp(lb), t0 = t0,
-       C0 = if (zhao) C0 else cf[[1]] + cf[[3]], residuals = f$residuals)
+  list(Cm = cf[[1]], a = if (hm) 0 else cf[[2]], b = exp(lb), t0 = t0,
+       C0 = if (zhao) C0 else cf[[1]] + cf[[length(cf)]], residuals = f$residuals)
 }
 
 # Linear or quadratic least-squares fit of concentration on elapsed seconds: the one place both
@@ -56,17 +58,32 @@
   if (quadratic) stats::lm(conc ~ elapsed_s + I(elapsed_s^2)) else stats::lm(conc ~ elapsed_s)
 }
 
-# Fitted curve of `model` ("linear", "quadratic", "exp_tz", "exp_zhao18") on the readings, at the
+# Fitted curve of `model` ("linear", "quadratic", "exp_tz", "exp_zhao18", "exp_hm") on the readings, at the
 # times `at` (s); NA where an exponential model has no usable fit.
 .model_curve <- function(model, conc, elapsed_s, at) {
-  if (model %in% c("exp_tz", "exp_zhao18")) {
-    ef <- .exp_curve_fit(conc, elapsed_s, zhao = model == "exp_zhao18")
+  if (model %in% c("exp_tz", "exp_zhao18", "exp_hm")) {
+    ef <- .exp_curve_fit(conc, elapsed_s, zhao = model == "exp_zhao18", hm = model == "exp_hm")
     if (is.null(ef)) return(rep(NA_real_, length(at)))
     u <- at - ef$t0
     return(ef$Cm + ef$a * u + (ef$C0 - ef$Cm) * exp(-ef$b * u))
   }
   stats::predict(.poly_fit(conc, elapsed_s, model == "quadratic"), newdata = data.frame(elapsed_s = at))
 }
+
+# Root mean square of the residuals of a fit, in the unit of the concentration (NA without residuals)
+.rmse <- function(res) if (length(res) && !anyNA(res)) sqrt(mean(res^2)) else NA_real_
+
+# Standard error of a linear-fit slope with the effective sample size n_e = n (1 - r1) / (1 + r1) in
+# the residual variance, because the OLS SE is biased for autocorrelated 1 Hz residuals (Kutzbach et
+# al. 2007, p. 1011; Santer et al. 2000, Eq. 6, p. 7343; AdjSE, p. 7344). `se_ols` is the OLS SE of
+# the slope, `e` the residuals. r1 is the lag-1 autocorrelation of `e`; the SE is NA when n_e <= 2.
+.santer_slope_se <- function(se_ols, e) {
+  n  <- length(e)
+  r1 <- if (n > 2) stats::acf(e, lag.max = 1, plot = FALSE, na.action = stats::na.pass)$acf[2] else NA_real_
+  ne <- n * (1 - r1) / (1 + r1)
+  list(r1 = r1, se = if (isTRUE(ne > 2)) se_ols * sqrt((n - 2) / (ne - 2)) else NA_real_)
+}
+.lm_slope_se <- function(fit) .santer_slope_se(summary(fit)$coefficients[2, 2], stats::residuals(fit))$se
 
 # Internal helper: fit a GHG concentration curve and return slope, R\u00b2, curvature b, and fit_used.
 # kappamax:            if provided and b > kappamax, exponential fits fall back to linear.
@@ -80,7 +97,7 @@
     fit <- .poly_fit(conc, elapsed_s)
     list(slope = unname(stats::coef(fit)[2]), r_square = summary(fit)$r.squared,
          b_param = NA_real_, fit_used = "linear", residuals = stats::residuals(fit),
-         kmax_used = NA_real_)
+         kmax_used = NA_real_, slope_se = .lm_slope_se(fit))
   }
 
   .quad_result <- function() {
@@ -90,9 +107,9 @@
          kmax_used = NA_real_, curvature = unname(stats::coef(fit)[3]))
   }
 
-  .exp_result <- function(zhao = FALSE) {
-    fit_used <- if (zhao) "exp_zhao18" else "exp_tz"
-    ef <- .exp_curve_fit(conc, elapsed_s, zhao)
+  .exp_result <- function(zhao = FALSE, hm = FALSE) {
+    fit_used <- if (zhao) "exp_zhao18" else if (hm) "exp_hm" else "exp_tz"
+    ef <- .exp_curve_fit(conc, elapsed_s, zhao, hm)
     if (is.null(ef)) return(NULL)
     # exp_zhao18 reports the slope at its fitted t0, exp_tz at the user's t_zero
     slope <- if (zhao) ef$a + ef$b * (ef$Cm - ef$C0) else
@@ -111,8 +128,8 @@
   if (fit_type == "linear")    return(.lm_result())
   if (fit_type == "quadratic") return(.quad_result())
 
-  if (fit_type %in% c("exp_tz", "exp_zhao18")) {
-    res <- .exp_result(zhao = fit_type == "exp_zhao18")
+  if (fit_type %in% c("exp_tz", "exp_zhao18", "exp_hm")) {
+    res <- .exp_result(zhao = fit_type == "exp_zhao18", hm = fit_type == "exp_hm")
     if (is.null(res)) return(list(slope = NA_real_, r_square = NA_real_,
                                   b_param = NA_real_, fit_used = fit_type,
                                   residuals = NA_real_, kmax_used = NA_real_))
@@ -121,7 +138,8 @@
       return(list(slope    = unname(stats::coef(lin)[2]),
                   r_square = summary(lin)$r.squared,
                   b_param  = res$b_param, fit_used = "linear",
-                  residuals = stats::residuals(lin), kmax_used = NA_real_))
+                  residuals = stats::residuals(lin), kmax_used = NA_real_,
+                  slope_se = .lm_slope_se(lin)))
     }
     return(res)
   }
@@ -189,6 +207,7 @@
          linear     = 2L,
          quadratic  = 3L,
          exp_tz     = 3L,
+         exp_hm     = 3L,
          exp_zhao18 = 4L,
          2L)
 }

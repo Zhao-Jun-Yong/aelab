@@ -10,7 +10,7 @@ plot_ghg_flux(
   ghg,
   fit_type = "linear",
   t_zero = 0,
-  flag_colors = c(ok = "#8ab29a", discard = "#f2cc8f", zero = "#f2cc8f", no_data =
+  flag_colors = c(ok = "#8ab29a", discard = "#f2cc8f", zero = "#6096BA", no_data =
     "#aaaaaa"),
   second_gas = NULL,
   base_size = 11
@@ -25,9 +25,9 @@ plot_ghg_flux(
 
 \item{fit_type}{Model used for windows without a \code{fit_used} value (results from older
 versions). One of \code{"linear"} (default), \code{"quadratic"}, \code{"exp_tz"},
-\code{"exp_zhao18"}, \code{"auto"} (drawn as linear).}
+\code{"exp_zhao18"}, \code{"exp_hm"}, \code{"auto"} (drawn as linear).}
 
-\item{t_zero}{Reference time in seconds for \code{"exp_tz"} slope. Default 0.}
+\item{t_zero}{Reference time in seconds for the \code{"exp_tz"} and \code{"exp_hm"} slope. Default 0.}
 
 \item{flag_colors}{Named character vector mapping flag values to colors.}
 
@@ -50,7 +50,9 @@ Plot GHG concentration over time for each measurement window, overlaid with the
   \code{fit_used} column. For CH4 closures split with \code{bubble_detection = TRUE}, the solid
   line is the linear diffusion fit over its segment (its colour is the diffusion fit's flag), the dashed white line is the two-point total
   (Minaudo et al. 2026, Eq. 1, p. 3), readings flagged as bubbles are coral triangles, and the
-  panel title adds the total, diffusion and ebullition slopes and \code{ch4_flag}.
+  panel title adds the total, diffusion and ebullition slopes and \code{ch4_flag}. When the result has an
+  \code{rmse} column, the title also gives the RMSE (unit of the gas) and the number of readings
+  of the fit, and, for closures without a bubble, the model in \code{fit_used}.
 }
 \examples{
 data(n2o)

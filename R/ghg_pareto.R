@@ -116,7 +116,8 @@
 
       candidates[[length(candidates) + 1]] <- list(
         deadband = db, cutoff = co,
-        slope = fit_out$slope, r_square = fit_out$r_square,
+        slope = fit_out$slope, r_square = fit_out$r_square, rmse = .rmse(fit_out$residuals),
+        slope_se = if (!is.null(fit_out$slope_se)) fit_out$slope_se else NA_real_,
         cor = stats::cor(cand_conc, cand_elapsed),
         b_param = fit_out$b_param, fit_used = fit_out$fit_used,
         slope_lm = if (!is.null(fit_out$slope_lm)) fit_out$slope_lm else NA_real_,

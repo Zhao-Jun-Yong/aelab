@@ -132,7 +132,7 @@
 .separate_ch4 <- function(time, conc, opt, t_ref = NA_real_) {
   out <- data.frame(total = NA_real_, diffusion = NA_real_, ebullition = NA_real_,
                     n_bubbles = NA_integer_, ch4_flag = "too few readings",
-                    diff_r2 = NA_real_, diff_cor = NA_real_, diff_se = NA_real_,
+                    diff_r2 = NA_real_, diff_rmse = NA_real_, diff_cor = NA_real_, diff_se = NA_real_,
                     diff_r1 = NA_real_,
                     diff_start = NA_real_, diff_end = NA_real_, diff_n = NA_integer_, total_s = NA_real_,
                     total_t0 = NA_real_, total_c0 = NA_real_, total_c1 = NA_real_,
@@ -211,13 +211,11 @@
   } else out$total <- window_total
   ebul <- out$total - d
   seg_i <- !excl & tt >= seg$fit[["start"]] & tt <= seg$fit[["end"]]
-  # 1 Hz residuals are autocorrelated, which biases the OLS SE (Kutzbach et al. 2007, p. 1011): residual
-  # variance with the effective sample size n_e = n (1 - r1) / (1 + r1) (Santer et al. 2000, Eq. 6,
-  # p. 7343; AdjSE, p. 7344); NA when n_e <= 2
+  # 1 Hz residuals are autocorrelated, which biases the OLS SE: Santer-corrected SE (.santer_slope_se)
   e <- stats::residuals(stats::lm(conc[seg_i] ~ tt[seg_i]))
-  out$diff_r1 <- if (length(e) > 2) stats::acf(e, lag.max = 1, plot = FALSE, na.action = stats::na.pass)$acf[2] else NA_real_
-  ne <- length(e) * (1 - out$diff_r1) / (1 + out$diff_r1)
-  out$diff_se <- if (isTRUE(ne > 2)) seg$fit[["se"]] * sqrt((length(e) - 2) / (ne - 2)) else NA_real_
+  sa <- .santer_slope_se(seg$fit[["se"]], e)
+  out$diff_r1 <- sa$r1
+  out$diff_se <- sa$se
   # TODO: possibly fire only when d - total > diffusion SE (as the label below), so a difference inside
   # the noise does not set review_needed (PT3-a, Fable review 1.12); no published multiplier, so unchanged
   labels <- c("diffusion > total flux"[d > out$total],
@@ -230,6 +228,7 @@
   out$diffusion <- d
   out$diff_cor <- stats::cor(tt[seg_i], conc[seg_i])
   out$diff_r2 <- out$diff_cor^2
+  out$diff_rmse <- .rmse(e)
   out$diff_n <- sum(seg_i)
   out$diff_start <- time[1] + seg$fit[["start"]]
   out$diff_end <- time[1] + seg$fit[["end"]]

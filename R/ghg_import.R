@@ -1,12 +1,42 @@
 utils::globalVariables(c("CO2", "CH4", "N2O", "conc", "analyzer_precision"))
 
+# Readings of a LI-COR .data file (LI-7810, LI-7820): the line starting DATAH names the columns, the
+# line starting DATAU gives their units, the DATA lines are the readings. Returns the table the Excel
+# export gives (DATE as "%Y/%m/%d", TIME as "%H:%M:%S", date_time, H2O, the gas columns, rows with
+# no gas reading dropped) and the unit of each column.
+.read_licor_data <- function(file_path, gas) {
+  lines <- readLines(file_path, warn = FALSE)
+  h <- grep("^DATAH\t", lines)[1]
+  u <- grep("^DATAU\t", lines)[1]
+  if (is.na(h) || is.na(u)) stop("No DATAH/DATAU header lines in ", basename(file_path), ".")
+  nm <- strsplit(lines[h], "\t", fixed = TRUE)[[1]]
+  keep <- c("DATE", "TIME", "H2O", if (gas == "ch4") c("CO2", "CH4") else "N2O")
+  if (!all(keep %in% nm))
+    stop("Header of ", basename(file_path), " has no ", paste(setdiff(keep, nm), collapse = ", "), " column.")
+  rows <- lines[startsWith(lines, "DATA\t")]
+  if (!length(rows)) stop(basename(file_path), " has no DATA lines.")
+  d <- utils::read.delim(text = rows, header = FALSE, quote = "", col.names = nm,
+                         colClasses = "character", fill = TRUE)
+  data <- d[keep]
+  for (g in setdiff(keep, c("DATE", "TIME"))) data[[g]] <- as.numeric(data[[g]])
+  data <- data[stats::complete.cases(data[setdiff(keep, c("DATE", "TIME", "H2O"))]), ]
+  rownames(data) <- NULL
+  data$DATE <- gsub("-", "/", data$DATE, fixed = TRUE)
+  data$date_time <- as.POSIXct(paste(data$DATE, data$TIME), format = "%Y/%m/%d %H:%M:%S")
+  un <- strsplit(lines[u], "\t", fixed = TRUE)[[1]]
+  un <- stats::setNames(un, nm)
+  list(data = data, units = un[intersect(c("CO2", "CH4", "N2O", "H2O"), keep)])  # order of the Excel path
+}
+
 #' @title tidy_ghg_analyzer
 #' @importFrom lubridate ymd_hms days hours minutes seconds force_tz
 #' @importFrom readxl read_excel
 #' @importFrom openxlsx convertToDateTime
 #' @importFrom dplyr filter
 #' @description Tidy the data downloaded from GHG Analyzer, with optional timestamp correction.
-#' @param file_path Directory of file.
+#' @param file_path Path of the file: the Excel export of the analyzer, or, for \code{analyzer = "licor"},
+#'   the LI-COR \code{.data} text file itself (chosen by the \code{.data} extension). Both give the
+#'   same table.
 #' @param gas Choose between CO2/CH4 or N2O LI-COR Trace Gas Analyzer, which is "ch4" and "n2o", respectively.
 #' @param analyzer The brand of the analyzer which the data was downloaded from.
 #' @param day Day offset to correct the analyzer timestamp.
@@ -34,11 +64,19 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
     stop("Unsupported analyzer/gas: \"", analyzer, "\"/\"", gas, "\". Use licor with \"ch4\" or \"n2o\", ",
          "or lgr with \"ch4\".")
 
-  # Import data from the specified Excel file
-  data <- readxl::read_excel(file_path, .name_repair = "minimal")
+  # LI-COR text file (.data) is read directly; anything else is the Excel export
+  is_raw <- analyzer == "licor" && grepl("\\.data$", file_path, ignore.case = TRUE)
+  if (is_raw) {
+    raw <- .read_licor_data(file_path, gas)
+    data <- raw$data
+  } else {
+    data <- readxl::read_excel(file_path, .name_repair = "minimal")
+  }
 
   # Tidy data based on the type of analyzer
-  if(analyzer == "licor") {
+  if (is_raw) {
+    NULL  # already tidy
+  } else if(analyzer == "licor") {
     # the header is row 5; columns are picked by their title
     keep <- c("DATE", "TIME", "H2O", if (gas == "ch4") c("CO2", "CH4") else "N2O")
     header <- as.character(unlist(data[5, ]))
@@ -92,7 +130,7 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
   }
 
   # concentration unit per gas, carried by calculate_regression() into slope_unit
-  units <- if (analyzer == "licor") c(CO2 = "ppm", CH4 = "ppb", N2O = "ppb", H2O = "ppm") else c(CO2 = "ppm", CH4 = "ppm")
+  units <- if (is_raw) raw$units else if (analyzer == "licor") c(CO2 = "ppm", CH4 = "ppb", N2O = "ppb", H2O = "ppm") else c(CO2 = "ppm", CH4 = "ppm")
   for (g in intersect(names(units), names(data))) data[[paste0(g, "_unit")]] <- units[[g]]
   # 1 s precision per gas, as goFlux's import functions add <gas>_prec (LI-COR only for now)
   if (analyzer == "licor") for (g in intersect(analyzer_precision$gas, names(data)))

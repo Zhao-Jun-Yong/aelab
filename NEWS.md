@@ -1,3 +1,33 @@
+# aelab (development version)
+
+## Reading and QC columns
+
+* `tidy_ghg_analyzer()` reads a LI-COR `.data` text file directly (`analyzer = "licor"`, chosen by the
+  `.data` extension) and returns the same table as the Excel export: on the four files of one
+  campaign (LI-7810 and LI-7820) the columns, values and row counts are identical. Units come from the
+  file's `DATAU` line.
+* `calculate_regression()` gains three columns: `rmse` (root mean square of the residuals of the fit in
+  `fit_used`, dividing by the number of readings as fluxible and goFlux; for closures with a CH4 bubble
+  it describes the diffusion fit like `r_square`, and `rmse_regression` keeps the regression's),
+  `data_ratio` (`n_obs` per second of the window, fluxible's data ratio) and `start_conc` (mean of the
+  first three readings of the closure, the readings fluxible's `start_error` check uses). None of them
+  sets a flag. `apply_ch4_review()` keeps `rmse` in step with `r_square`, and `n_obs_diffusion` with the
+  decision (`n_obs` for `"not_bubble"`, `NA` for `"total"`; it kept the old diffusion segment's count).
+* New column `slope_se` (and `slope_se_regression` with `bubble_detection = TRUE`): the standard error of
+  `slope` for linear fits, with the same Santer et al. (2000) effective-sample-size correction as
+  `slope_diffusion_se` (now one shared function; its values are unchanged). `NA` for the other models and
+  when `slope` is the total of a closure with a bubble. `apply_ch4_review()` keeps it in step with
+  `slope`, and `calculate_ghg_flux()` adds `flux_se` from it.
+* `plot_ghg_flux()`: the panel title adds the model (closures without a bubble), `RMSE` and `n`; the
+  default colour of the `zero` flag is `#6096BA` (was the yellow of `discard`).
+
+## `exp_hm`
+
+* New `fit_type = "exp_hm"`: the Hutchinson-Mosier curve `Cm + (C0 - Cm) exp(-b t)` with slope
+  `b (Cm - C0) exp(-b t0)` (fluxible's `exp_hm`, Gaudard et al. 2025; goFlux's HM fit has the same
+  form). `C0` and `Cm` are fitted. It is selected by name only; `"auto"` and `"pareto"` do not use it.
+  Without curvature it gives an `NA` slope, as `exp_tz`.
+
 # aelab 1.2.0
 
 ## Workflow

@@ -15,7 +15,9 @@ tidy_ghg_analyzer(
 )
 }
 \arguments{
-\item{file_path}{Directory of file.}
+\item{file_path}{Path of the file: the Excel export of the analyzer, or, for \code{analyzer = "licor"},
+the LI-COR \code{.data} text file itself (chosen by the \code{.data} extension). Both give the
+same table.}
 
 \item{gas}{Choose between CO2/CH4 or N2O LI-COR Trace Gas Analyzer, which is "ch4" and "n2o", respectively.}
 
