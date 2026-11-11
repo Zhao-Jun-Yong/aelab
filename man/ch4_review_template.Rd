@@ -12,8 +12,9 @@ ch4_review_template(regression_result, by = c("site", "reference_time"))
 \item{by}{Columns identifying a closure. Default \code{c("site", "reference_time")}.}
 }
 \value{
-The rows with \code{review_needed = TRUE}: the \code{by} columns, \code{ch4_flag} and an
-  empty (\code{NA}) \code{decision} column to fill in with \code{"accept"}, \code{"total"},
+The rows with \code{review_needed = TRUE}: the \code{by} columns, \code{ch4_flag},
+  \code{r_square_regression} (R\eqn{^2} of the regression fit over the whole window, to sort
+  the list by) and an empty (\code{NA}) \code{decision} column to fill in with \code{"accept"}, \code{"total"},
   \code{"not_bubble"} or \code{"discard"}.
 }
 \description{

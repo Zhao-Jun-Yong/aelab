@@ -777,8 +777,9 @@ apply_ch4_review <- function(regression_result, decisions, by = c("site", "refer
 #' @description Table of the closures that need a decision, for \code{\link{apply_ch4_review}}.
 #' @param regression_result Output of \code{calculate_regression(bubble_detection = TRUE)}.
 #' @param by Columns identifying a closure. Default \code{c("site", "reference_time")}.
-#' @return The rows with \code{review_needed = TRUE}: the \code{by} columns, \code{ch4_flag} and an
-#'   empty (\code{NA}) \code{decision} column to fill in with \code{"accept"}, \code{"total"},
+#' @return The rows with \code{review_needed = TRUE}: the \code{by} columns, \code{ch4_flag},
+#'   \code{r_square_regression} (R\eqn{^2} of the regression fit over the whole window, to sort
+#'   the list by) and an empty (\code{NA}) \code{decision} column to fill in with \code{"accept"}, \code{"total"},
 #'   \code{"not_bubble"} or \code{"discard"}.
 #' @examples
 #' t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
@@ -795,7 +796,7 @@ ch4_review_template <- function(regression_result, by = c("site", "reference_tim
   if (!"review_needed" %in% names(reg))
     stop("regression_result needs the columns of calculate_regression(bubble_detection = TRUE).")
   if (length(setdiff(by, names(reg)))) stop("regression_result is missing: ", paste(setdiff(by, names(reg)), collapse = ", "))
-  out <- reg[reg$review_needed %in% TRUE, c(by, "ch4_flag")]
+  out <- reg[reg$review_needed %in% TRUE, c(by, "ch4_flag", "r_square_regression")]
   out$decision <- NA_character_
   out
 }

@@ -643,7 +643,8 @@ test_that("apply_ch4_review applies decisions", {
   tmpl <- ch4_review_template(reg)
   expect_equal(nrow(tmpl), sum(reg$review_needed))
   expect_true(all(is.na(tmpl$decision)))
-  expect_equal(names(tmpl), c("site", "reference_time", "ch4_flag", "decision"))
+  expect_equal(names(tmpl), c("site", "reference_time", "ch4_flag", "r_square_regression", "decision"))
+  expect_equal(tmpl$r_square_regression, reg$r_square_regression[reg$review_needed])
   tmpl$decision <- "not_bubble"
   expect_equal(apply_ch4_review(reg, tmpl)$ch4_decision[reg$review_needed], rep("not_bubble", nrow(tmpl)))
   expect_error(ch4_review_template(plain), "bubble_detection")
