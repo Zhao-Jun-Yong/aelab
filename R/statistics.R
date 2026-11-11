@@ -244,7 +244,7 @@ ks_test <- function(df, variable_name, group) {
   df_safe          <- df
   df_safe[[group]] <- gsub("-", ".", as.character(df[[group]]), fixed = TRUE)
 
-  dunn_results <- FSA::dunnTest(df_safe[[variable_name]], df_safe[[group]], method = "bonferroni")
+  dunn_results <- FSA::dunnTest(df_safe[[variable_name]], factor(df_safe[[group]]), method = "bonferroni")
   dunn_results <- dunn_results$res
 
   label <- rcompanion::cldList(
