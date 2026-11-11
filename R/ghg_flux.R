@@ -1936,13 +1936,37 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   out
 }
 
+# Abridged standard atomic weights, IUPAC (Prohaska et al. 2022, Pure Appl. Chem.
+# 94(5): 573-600, Table 1, pp. 581-582). Molar masses and C/N element ratios are built from these.
+.atomic_weight <- c(H = 1.008, C = 12.011, N = 14.007, O = 15.999)
+
+.molar_mass <- function(ghg) {
+  w <- .atomic_weight
+  switch(ghg,
+    "co2" = unname(w["C"] + 2 * w["O"]),
+    "ch4" = unname(w["C"] + 4 * w["H"]),
+    "n2o" = unname(2 * w["N"] + w["O"]),
+    stop("Invalid ghg. One of: co2, ch4, n2o"))
+}
+
+# Mass of gas per mass of its C (co2, ch4) or N (n2o) content
+.element_ratio <- function(ghg) {
+  w <- .atomic_weight
+  .molar_mass(ghg) / switch(ghg, "co2" = , "ch4" = w[["C"]], "n2o" = 2 * w[["N"]])
+}
+
 #' @title convert_ghg_unit
 #' @description Convert a greenhouse gas (GHG) flux value (or a character string
 #'   containing one or more numeric values, e.g. \code{"0.002 +/- 0.003"})
 #'   between flux units. Defaults to micrograms per square meter per hour.
 #' @details Numeric values embedded in a string (e.g. mean +/- SD notation)
 #'   are each converted individually and the surrounding text is preserved.
-#'   Commas are treated as decimal separators.
+#'   Commas are treated as decimal separators. A number written as
+#'   \code{n = 3} (sample size) is left unchanged.
+#'
+#'   Molar masses (CO2 44.009, CH4 16.043, N2O 44.013 g mol\eqn{^{-1}}) are
+#'   computed from the IUPAC abridged standard atomic weights (Prohaska et al. 2022,
+#'   \emph{Pure and Applied Chemistry} 94: 573--600).
 #' @param input A numeric vector or a character string containing one or more
 #'   numbers. Numeric vectors are handled element-wise, making the function
 #'   compatible with \code{dplyr::mutate()}.
@@ -1950,7 +1974,9 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 #'   \code{"ch4"}, or \code{"n2o"}.
 #' @param mass Mass unit of the input flux. One of \code{"mmol"}, \code{"mg"},
 #'   \code{"g"}, \code{"ug"} (micrograms), \code{"nmol"}, \code{"Mg"},
-#'   \code{"umol"} (micromoles), \code{"mol"}. Default \code{"ug"}.
+#'   \code{"umol"} (micromoles), \code{"mol"}. \code{"ug"}/\code{"umol"} and the
+#'   micro-sign spellings are interchangeable. Default
+#'   \code{"ug"}.
 #' @param area Area unit of the input flux. One of \code{"ha"}, \code{"m2"}.
 #'   Default \code{"m2"}.
 #' @param time Time unit of the input flux. One of \code{"yr"}, \code{"day"},
@@ -1962,9 +1988,13 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 #'   Default \code{"m2"}.
 #' @param to_time Target time unit. Same options as \code{time}. Default
 #'   \code{"hr"}.
-#' @param digits Number of decimal places to round to. Default 2.
-#' @param ratio Logical. If \code{TRUE}, apply an elemental-ratio correction
-#'   (C-basis for CH4, N-basis for N2O). Default \code{FALSE}.
+#' @param digits Number of decimal places to round to. Default \code{NULL}
+#'   (no rounding).
+#' @param ratio Logical. If \code{TRUE}, the input is the mass of carbon
+#'   (CO2, CH4) or nitrogen (N2O) only and is converted to the mass of the
+#'   gas (factor molar mass of the gas / mass of its C or N atoms: CO2 3.664,
+#'   CH4 1.336, N2O 1.571). Not allowed with a molar \code{mass} unit.
+#'   Default \code{FALSE}.
 #' @return For numeric input: a numeric vector of converted values.
 #'   For character input: a character vector with numbers converted in-place
 #'   (e.g. \code{"0.002 +/- 0.003"} becomes \code{"0.03 +/- 0.05"}).
@@ -1974,20 +2004,24 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 #' @export
 convert_ghg_unit <- function(input, ghg, mass = "\u00b5g", area = "m2",
                              time = "hr", to_mass = "\u00b5g", to_area = "m2",
-                             to_time = "hr", digits = 2, ratio = FALSE) {
+                             to_time = "hr", digits = NULL, ratio = FALSE) {
   valid_masses <- c("mmol", "mg", "g", "\u00b5g", "nmol", "Mg", "\u00b5mol", "mol")
   valid_areas  <- c("ha", "m2")
   valid_times  <- c("yr", "day", "hr", "sec", "min")
 
-  molar_mass <- switch(ghg,
-    "co2" = 44.01, "ch4" = 16.04, "n2o" = 44.01,
-    stop(paste("Invalid ghg. One of: co2, ch4, n2o")))
+  molar_mass <- .molar_mass(ghg)
+  micro <- function(x) sub("^[u\u03bc](g|mol)$", "\u00b5\\1", x)
+  mass <- micro(mass)
+  to_mass <- micro(to_mass)
   if (!(mass    %in% valid_masses)) stop(paste("Invalid mass. One of:",    paste(valid_masses, collapse = ", ")))
   if (!(area    %in% valid_areas))  stop(paste("Invalid area. One of:",    paste(valid_areas,  collapse = ", ")))
   if (!(time    %in% valid_times))  stop(paste("Invalid time. One of:",    paste(valid_times,  collapse = ", ")))
   if (!(to_mass %in% valid_masses)) stop(paste("Invalid to_mass. One of:", paste(valid_masses, collapse = ", ")))
   if (!(to_area %in% valid_areas))  stop(paste("Invalid to_area. One of:", paste(valid_areas,  collapse = ", ")))
   if (!(to_time %in% valid_times))  stop(paste("Invalid to_time. One of:", paste(valid_times,  collapse = ", ")))
+
+  if (ratio && mass %in% c("mmol", "nmol", "\u00b5mol", "mol"))
+    stop("ratio = TRUE needs a mass unit (not mol): 1 mol of C or N is 1 mol of gas.")
 
   # Vectorize \u2014 validation runs once here, not once per element
   if (length(input) > 1) {
@@ -2023,10 +2057,7 @@ convert_ghg_unit <- function(input, ghg, mass = "\u00b5g", area = "m2",
       "hr"  = value
     )
     # Optional elemental-ratio correction
-    if (ratio) {
-      if (ghg == "ch4") value <- value * (16.04 / 12.01)
-      if (ghg == "n2o") value <- value * (44.013 / 14.0067)
-    }
+    if (ratio) value <- value * .element_ratio(ghg)
     # Step 2: \u00b5g m\u207b\u00b2 h\u207b\u00b9 \u2192 target units
     # Defaults (\u00b5g, m2, hr) are all identity \u2014 existing calls unchanged
     value <- switch(to_mass,
@@ -2047,7 +2078,7 @@ convert_ghg_unit <- function(input, ghg, mass = "\u00b5g", area = "m2",
       "min" = value / 60,
       "hr"  = value
     )
-    round(value, digits)
+    if (is.null(digits)) value else round(value, digits)
   }
 
   # Numeric scalar: convert directly, return numeric
@@ -2056,14 +2087,15 @@ convert_ghg_unit <- function(input, ghg, mass = "\u00b5g", area = "m2",
   # Character input: convert numbers in-place, return modified string
   if (input == "") return(NA_character_)
   input <- gsub(",", ".", as.character(input))
-  numeric_values <- unlist(regmatches(input,
-    gregexpr("[-+]?[0-9]*\\.?[0-9]+", input)))
-  if (length(numeric_values) == 0) return(NA_character_)
-
-  for (num in numeric_values) {
-    converted_num <- convert_value(as.numeric(num))
-    input <- gsub(paste0("\\b", num, "\\b"), as.character(converted_num), input)
-  }
+  m <- gregexpr("[nN]\\s*=\\s*[0-9]+|[-+]?[0-9]*\\.?[0-9]+", input)
+  tokens <- regmatches(input, m)[[1]]
+  if (length(tokens) == 0) return(NA_character_)
+  tokens <- vapply(tokens, function(tok) {
+    if (grepl("^[nN]", tok)) return(tok)
+    format(signif(convert_value(as.numeric(tok)), 15), scientific = FALSE,
+           trim = TRUE)
+  }, character(1), USE.NAMES = FALSE)
+  regmatches(input, m) <- list(tokens)
 
   input
 }
@@ -2104,15 +2136,14 @@ calculate_MDF <- function(precision_ppm, closure_time_s, data_point_n,
     stop("All parameters must be positive and non-zero.")
   }
 
-  molar_masses <- list(co2 = 44.01, ch4 = 16.04, n2o = 44.01)
-  if (!(ghg %in% names(molar_masses)))
+  if (!(ghg %in% c("co2", "ch4", "n2o")))
     stop("Invalid GHG type. Choose from 'co2', 'ch4', or 'n2o'.")
 
   part1    <- precision_ppm / (closure_time_s * sqrt(data_point_n))
   part2    <- (chamber_volume_m3 * pressure_pa) /
                 (ideal_constant * (temperature_C + 273.15) * chamber_area_m2)
   MDF_umol <- part1 * part2 * 3600
-  MDF      <- MDF_umol * molar_masses[[ghg]]
+  MDF      <- MDF_umol * .molar_mass(ghg)
 
   list(MDF = MDF, unit = "\u00b5g m\u207b\u00b2 h\u207b\u00b9")
 }

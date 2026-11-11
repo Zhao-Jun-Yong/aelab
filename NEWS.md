@@ -1,5 +1,18 @@
 # aelab (development version)
 
+## `convert_ghg_unit()`
+
+* `ratio = TRUE` for N2O now divides by two N atoms (44.013 / 28.014 = 1.571; was 3.142, two times too
+  large). For CO2 it now converts CO2-C to CO2 (3.664; was ignored). With a molar `mass` unit it stops
+  with an error (it used to give wrong values).
+* Molar masses and element ratios come from the IUPAC abridged standard atomic weights (Prohaska et al.
+  2022): CO2 44.009, CH4 16.043, N2O 44.013 g/mol (were 44.01, 16.04, 44.01). `calculate_MDF()` uses
+  the same values (changes of 0.02 % or less).
+* `digits` defaults to `NULL` (no rounding; was 2, which turned 1500 ug into 0 g). Pass `digits = 2`
+  for the old behaviour.
+* `"ug"` and `"umol"` work as `mass`/`to_mass` (as the help page said).
+* In strings, `n = 3` is left unchanged, and every number is converted once.
+
 ## Diffusion SE with autocorrelated readings
 
 * `slope_diffusion_se` now uses the effective sample size n(1 - r1)/(1 + r1) in the residual

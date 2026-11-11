@@ -612,6 +612,27 @@ test_that("convert_ghg_unit converts correctly", {
   expect_equal(result, 44010, tolerance = 1)  # 1 mmol co2 = 44.01g/mol * 1000 µg/mg * 1000 = 44010 µg
 })
 
+test_that("convert_ghg_unit ratio uses C or N content of the gas", {
+  expect_equal(convert_ghg_unit(28, "n2o", ratio = TRUE), 28 * 44.013 / 28.014)
+  expect_equal(convert_ghg_unit(12, "co2", ratio = TRUE), 12 * 44.009 / 12.011)
+  expect_equal(convert_ghg_unit(12, "ch4", ratio = TRUE), 12 * 16.043 / 12.011)
+  expect_error(convert_ghg_unit(1, "ch4", mass = "\u00b5mol", ratio = TRUE), "ratio")
+})
+
+test_that("convert_ghg_unit takes ASCII units and does not round by default", {
+  expect_equal(convert_ghg_unit(2, "ch4", mass = "umol"),
+               convert_ghg_unit(2, "ch4", mass = "\u00b5mol"))
+  expect_equal(convert_ghg_unit(1500, "ch4", to_mass = "g"), 0.0015)
+  expect_equal(convert_ghg_unit(1500, "ch4", to_mass = "g", digits = 2), 0)
+})
+
+test_that("convert_ghg_unit converts each number in a string once, not n =", {
+  expect_equal(convert_ghg_unit("1.5 (n=3)", "ch4", to_mass = "mg"), "0.0015 (n=3)")
+  expect_equal(convert_ghg_unit("2 \u00b1 20", "ch4", to_mass = "mg"), "0.002 \u00b1 0.02")
+  expect_equal(convert_ghg_unit("10 \u00b1 10", "ch4", to_mass = "mg"), "0.01 \u00b1 0.01")
+  expect_equal(convert_ghg_unit("1.69 + 0.95", "ch4", to_mass = "mg"), "0.00169 + 0.00095")
+})
+
 test_that("convert_ghg_unit throws error for invalid GHG", {
   expect_error(convert_ghg_unit(1, "invalid_gas"), "Invalid ghg")
 })

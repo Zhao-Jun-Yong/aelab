@@ -13,7 +13,7 @@ convert_ghg_unit(
   to_mass = "µg",
   to_area = "m2",
   to_time = "hr",
-  digits = 2,
+  digits = NULL,
   ratio = FALSE
 )
 }
@@ -27,7 +27,9 @@ compatible with \code{dplyr::mutate()}.}
 
 \item{mass}{Mass unit of the input flux. One of \code{"mmol"}, \code{"mg"},
 \code{"g"}, \code{"ug"} (micrograms), \code{"nmol"}, \code{"Mg"},
-\code{"umol"} (micromoles), \code{"mol"}. Default \code{"ug"}.}
+\code{"umol"} (micromoles), \code{"mol"}. \code{"ug"}/\code{"umol"} and the
+micro-sign spellings are interchangeable. Default
+\code{"ug"}.}
 
 \item{area}{Area unit of the input flux. One of \code{"ha"}, \code{"m2"}.
 Default \code{"m2"}.}
@@ -45,10 +47,14 @@ Default \code{"m2"}.}
 \item{to_time}{Target time unit. Same options as \code{time}. Default
 \code{"hr"}.}
 
-\item{digits}{Number of decimal places to round to. Default 2.}
+\item{digits}{Number of decimal places to round to. Default \code{NULL}
+(no rounding).}
 
-\item{ratio}{Logical. If \code{TRUE}, apply an elemental-ratio correction
-(C-basis for CH4, N-basis for N2O). Default \code{FALSE}.}
+\item{ratio}{Logical. If \code{TRUE}, the input is the mass of carbon
+(CO2, CH4) or nitrogen (N2O) only and is converted to the mass of the
+gas (factor molar mass of the gas / mass of its C or N atoms: CO2 3.664,
+CH4 1.336, N2O 1.571). Not allowed with a molar \code{mass} unit.
+Default \code{FALSE}.}
 }
 \value{
 For numeric input: a numeric vector of converted values.
@@ -64,7 +70,12 @@ Convert a greenhouse gas (GHG) flux value (or a character string
 \details{
 Numeric values embedded in a string (e.g. mean +/- SD notation)
   are each converted individually and the surrounding text is preserved.
-  Commas are treated as decimal separators.
+  Commas are treated as decimal separators. A number written as
+  \code{n = 3} (sample size) is left unchanged.
+
+  Molar masses (CO2 44.009, CH4 16.043, N2O 44.013 g mol\eqn{^{-1}}) are
+  computed from the IUPAC abridged standard atomic weights (Prohaska et al. 2022,
+  \emph{Pure and Applied Chemistry} 94: 573--600).
 }
 \examples{
 convert_ghg_unit(97, ghg = "ch4", mass = "mg", area = "m2", time = "hr")
