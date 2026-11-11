@@ -268,7 +268,11 @@ A tibble with columns: \code{start_time}, \code{end_time}, \code{slope} (per sec
   \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error;
   \code{NA} without a bubble), \code{slope_ebullition} (unit of \code{ghg} per second),
   \code{diffusion_start}, \code{diffusion_end} (the diffusion segment; the window without a
-  bubble), \code{n_bubbles}, \code{ch4_flag} and \code{review_needed} (\code{TRUE} unless
+  bubble), \code{total_start}, \code{total_start_conc}, \code{total_end_conc} (start time and
+  the two end points of the two-point total, which runs to the last reading; \code{NA} without
+  a bubble), \code{bubble_spans} (flagged readings as seconds from the first reading of the
+  window, e.g. \code{"26-31; 227-282"}; \code{NA} without a bubble; drawn by
+  \code{\link{plot_ghg_flux}}), \code{n_bubbles}, \code{ch4_flag} and \code{review_needed} (\code{TRUE} unless
   \code{ch4_flag} is \code{"ok"}, \code{"no bubble"} or \code{"no bubble: rises <= min_rise"}).
   For closures with a bubble, \code{slope} is
   \code{slope_total} and \code{below_mdf} is for the total, while \code{r_square},

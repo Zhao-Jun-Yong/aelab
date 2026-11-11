@@ -94,6 +94,41 @@ test_that("calculate_regression slope is in ppm/s (elapsed seconds x-axis)", {
   expect_equal(result$slope, 0.01, tolerance = 1e-6)
 })
 
+test_that("calculate_regression matches date_time-only data on a non-Taipei system", {
+  old <- Sys.getenv("TZ", unset = NA)
+  on.exit(if (is.na(old)) Sys.unsetenv("TZ") else Sys.setenv(TZ = old))
+  Sys.setenv(TZ = "Europe/Berlin")
+  set.seed(1)
+  data <- data.frame(date_time = as.POSIXct("2024-01-01 08:00:00") + 0:299,
+                     CH4 = 2000 + 0.5 * (0:299) + rnorm(300))
+  ref <- data.frame(date_time = as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei"),
+                    site = "x", analyzer = "a")
+  result <- calculate_regression(data, ref, "CH4", reference_time = "date_time", site = "site",
+                                 analyzer_code = "a", duration_minutes = 4)
+  expect_equal(result$flag, "ok")
+  expect_equal(result$slope, 0.5, tolerance = 0.01)
+})
+
+test_that("plot_ghg_flux draws fit_used, labels the unit and warns on no data", {
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  e <- 0:299
+  set.seed(1)
+  d <- data.frame(real_datetime = t0 + e, CH4 = 2000 + 2 * e - 0.004 * e^2 + rnorm(300, 0, 0.5),
+                  CH4_unit = "ppb")
+  ref <- data.frame(date_time = t0, site = "x", analyzer = "a")
+  r <- calculate_regression(d, ref, "CH4", "date_time", "site", "a", fit_type = "quadratic",
+                            duration_minutes = 299 / 60)
+  p <- plot_ghg_flux(d, r, "CH4")  # default fit_type = "linear", but fit_used is quadratic
+  ln <- ggplot2::layer_data(p, 2)
+  expect_equal(ln$y, 2000 + 2 * ln$x - 0.004 * ln$x^2, tolerance = 1e-3)
+  expect_equal(p$labels$y, "CH4 (ppb)")
+  ra <- calculate_regression(d, ref, "CH4", "date_time", "site", "a", fit_type = "auto",
+                             duration_minutes = 299 / 60)
+  expect_s3_class(plot_ghg_flux(d, ra, "CH4", fit_type = "auto"), "ggplot")
+  expect_warning(expect_null(plot_ghg_flux(transform(d, real_datetime = real_datetime + 86400), r, "CH4")),
+                 "no window")
+})
+
 test_that("calculate_regression flags clean linear signal as ok", {
   elapsed <- seq(0, 419)
   data <- data.frame(
@@ -505,6 +540,17 @@ test_that("bubble_detection guards, new columns, plot and option checks", {
   f <- calculate_ghg_flux(cbind(r, area = 1, volume = 1, temp = 25))
   expect_equal(f$flux_diffusion_se / f$flux_diffusion, r$slope_diffusion_se / r$slope_diffusion)
   expect_s3_class(plot_ghg_flux(d, r, "CH4"), "ggplot")
+
+  # bubble spans and two-point total end points for the plot
+  expect_match(r$bubble_spans, "^9[0-9]-10[0-9]")  # the step at 100 s
+  expect_equal(r$total_start, r$start_time)
+  expect_equal((r$total_end_conc - r$total_start_conc) / 299, r$slope_total)
+  p <- plot_ghg_flux(transform(d, CO2 = 400 + 0:299 / 10), r, "CH4", second_gas = "CO2")
+  pd <- ggplot2::ggplot_build(p)$data
+  expect_equal(length(unique(ggplot2::ggplot_build(p)$layout$layout$PANEL)), 2)
+  expect_true(any(vapply(pd, function(l) all(l$shape == 17), logical(1))))  # bubble readings
+  expect_true(any(vapply(pd, function(l) "linetype" %in% names(l) && any(l$linetype == "22"), logical(1))))
+  expect_error(plot_ghg_flux(d, r, "CH4", second_gas = "CO2"), "CO2")
 
   # a 2-reading run spanning >= 20 s is skipped, not an error
   expect_false(.first_linear_ch4(c(0, 25), c(2, 2.1), c(FALSE, FALSE))$ok)

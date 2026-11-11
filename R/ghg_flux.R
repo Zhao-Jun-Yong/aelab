@@ -785,7 +785,11 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error;
 #'   \code{NA} without a bubble), \code{slope_ebullition} (unit of \code{ghg} per second),
 #'   \code{diffusion_start}, \code{diffusion_end} (the diffusion segment; the window without a
-#'   bubble), \code{n_bubbles}, \code{ch4_flag} and \code{review_needed} (\code{TRUE} unless
+#'   bubble), \code{total_start}, \code{total_start_conc}, \code{total_end_conc} (start time and
+#'   the two end points of the two-point total, which runs to the last reading; \code{NA} without
+#'   a bubble), \code{bubble_spans} (flagged readings as seconds from the first reading of the
+#'   window, e.g. \code{"26-31; 227-282"}; \code{NA} without a bubble; drawn by
+#'   \code{\link{plot_ghg_flux}}), \code{n_bubbles}, \code{ch4_flag} and \code{review_needed} (\code{TRUE} unless
 #'   \code{ch4_flag} is \code{"ok"}, \code{"no bubble"} or \code{"no bubble: rises <= min_rise"}).
 #'   For closures with a bubble, \code{slope} is
 #'   \code{slope_total} and \code{below_mdf} is for the total, while \code{r_square},
@@ -937,9 +941,9 @@ calculate_regression <- function(data, reference_df, ghg,
 
   if (!"real_datetime" %in% colnames(data) && "date_time" %in% colnames(data)) {
     data$real_datetime <- data$date_time
-  } else {
-    data$real_datetime <- lubridate::force_tz(data$real_datetime, tzone = "Asia/Taipei")
   }
+  # clock times as Taipei, as the reference times; else a non-Taipei system gives no_data
+  data$real_datetime <- lubridate::force_tz(data$real_datetime, tzone = "Asia/Taipei")
 
   results <- purrr::map_dfr(seq_along(reference_time_vec), function(i) {
     reference_datetime <- reference_time_vec[i]
@@ -1145,7 +1149,9 @@ calculate_regression <- function(data, reference_df, ghg,
         slope_ebullition = split$ebullition,
         diffusion_start = format(as.POSIXct(split$diff_start, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
         diffusion_end = format(as.POSIXct(split$diff_end, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
-        n_bubbles = split$n_bubbles, ch4_flag = split$ch4_flag,
+        total_start = format(as.POSIXct(split$total_t0, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
+        total_start_conc = split$total_c0, total_end_conc = split$total_c1,
+        bubble_spans = split$bubble_spans, n_bubbles = split$n_bubbles, ch4_flag = split$ch4_flag,
         review_needed = !split$ch4_flag %in% c("ok", "no bubble", "no bubble: rises <= min_rise")))
     }
     out
@@ -1348,22 +1354,32 @@ apply_ch4_review <- function(regression_result, decisions, by = c("site", "refer
   reg
 }
 
+utils::globalVariables("line")  # plot_ghg_flux() aes column
+
 #' @title plot_ghg_flux
 #' @description Plot GHG concentration over time for each measurement window, overlaid with the
-#'   fitted regression line and colored by quality flag. Use this for visual QC of
-#'   \code{\link{calculate_regression}} output. For CH4 closures split with
-#'   \code{bubble_detection = TRUE}, the line is the linear diffusion fit over its segment and the
-#'   panel title adds the diffusion slope and \code{ch4_flag}.
+#'   fitted line, colored by its quality flag (\code{flag}). Use this for visual QC of
+#'   \code{\link{calculate_regression}} output. Each window is drawn with the model in its
+#'   \code{fit_used} column. For CH4 closures split with \code{bubble_detection = TRUE}, the solid
+#'   line is the linear diffusion fit over its segment (its colour is the diffusion fit's flag), the dashed white line is the two-point total
+#'   (Minaudo et al. 2026, Eq. 1, p. 3), readings flagged as bubbles are coral triangles, and the
+#'   panel title adds the total, diffusion and ebullition slopes and \code{ch4_flag}.
 #' @param data Analyzer data processed by \code{tidy_ghg_analyzer()} and \code{convert_time()}.
 #' @param regression_result Output tibble from \code{calculate_regression()}.
 #' @param ghg Column name in \code{data} for the gas concentration (e.g. \code{"CH4"}, \code{"N2O"}).
-#' @param fit_type Model used to draw the fitted line. Should match the \code{fit_type} used in
-#'   \code{calculate_regression()}. One of \code{"linear"} (default), \code{"exp_tz"},
-#'   \code{"exp_zhao18"}.
+#' @param fit_type Model used for windows without a \code{fit_used} value (results from older
+#'   versions). One of \code{"linear"} (default), \code{"quadratic"}, \code{"exp_tz"},
+#'   \code{"exp_zhao18"}, \code{"auto"} (drawn as linear).
 #' @param t_zero Reference time in seconds for \code{"exp_tz"} slope. Default 0.
 #' @param flag_colors Named character vector mapping flag values to colors.
-#' @return A \code{ggplot} object with one facet per site. Each panel shows raw concentration
-#'   points and the fitted line, with strip text showing slope, R\eqn{^2}, and flag.
+#' @param second_gas Optional column name in \code{data} (e.g. \code{"CO2"}) drawn in a panel
+#'   beside each window, same time axis, readings only. A jump in both gases at once points to a
+#'   chamber disturbance rather than a bubble (Minaudo et al. 2026, Guideline 5, p. 10).
+#'   Default \code{NULL} (none).
+#' @param base_size Base font size of the aelab minimal theme (as \code{\link{plot_point}}). Default 11.
+#' @return A \code{ggplot} object with one panel per window (two with \code{second_gas}), or
+#'   \code{NULL} with a warning when no window has readings. The y axis gives the unit from
+#'   \code{slope_unit} or the \code{<gas>_unit} column of \code{tidy_ghg_analyzer()}.
 #' @examples
 #' data(n2o)
 #' n2o_converted <- convert_time(n2o)
@@ -1382,127 +1398,162 @@ apply_ch4_review <- function(regression_result, decisions, by = c("site", "refer
 
 plot_ghg_flux <- function(data, regression_result, ghg,
                           fit_type = "linear", t_zero = 0,
-                          flag_colors = c(ok      = "#2ca25f",
-                                          discard = "#fc8d59",
-                                          zero    = "#74c7ef",
-                                          no_data = "#aaaaaa")) {
+                          flag_colors = c(ok      = "#8ab29a",
+                                          discard = "#f2cc8f",
+                                          zero    = "#f2cc8f",
+                                          no_data = "#aaaaaa"),
+                          second_gas = NULL, base_size = 11) {
 
-  fit_type <- match.arg(fit_type, c("linear", "quadratic", "exp_tz", "exp_zhao18"))
+  fit_type <- match.arg(fit_type, c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
+  for (g in c(ghg, second_gas))
+    if (!g %in% names(data)) stop("Column '", g, "' not found in data.")
 
   if (!"real_datetime" %in% colnames(data) && "date_time" %in% colnames(data)) {
     data$real_datetime <- data$date_time
-  } else {
-    data$real_datetime <- lubridate::force_tz(data$real_datetime, tzone = "Asia/Taipei")
   }
+  # clock times as Taipei, as the reference times; else a non-Taipei system gives no_data
+  data$real_datetime <- lubridate::force_tz(data$real_datetime, tzone = "Asia/Taipei")
+
+  unit_of <- function(g) {
+    u <- if (g == ghg && "slope_unit" %in% names(regression_result)) sub(" s-1$", "", regression_result$slope_unit)
+    if (!length(stats::na.omit(u)) && paste0(g, "_unit") %in% names(data)) u <- data[[paste0(g, "_unit")]]
+    u <- unique(stats::na.omit(u))
+    if (length(u) == 1) paste0(g, " (", u, ")") else g
+  }
+  as_time <- function(x) as.POSIXct(x, format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
+  num <- function(x, d = 3) if (is.na(x)) "NA" else trimws(formatC(x, digits = d, format = "g"))
 
   # bubble closures from calculate_regression(bubble_detection = TRUE): the diffusion line is drawn
   is_split <- function(row) "ch4_flag" %in% names(row) && !startsWith(row$ch4_flag, "no bubble") &&
     !is.na(row$diffusion_start)
+  has_total <- function(row) "total_start_conc" %in% names(row) && !is.na(row$total_start_conc)
+  # bubble closures: slope is the total, while R2 and flag describe the diffusion fit
   label_of <- function(row) {
-    slope_lbl <- if (!is.na(row$slope))    formatC(row$slope,    digits = 5, format = "g") else "NA"
-    r2_lbl    <- if (!is.na(row$r_square)) round(row$r_square, 3)                          else "NA"
-    lbl <- paste0(row$site, "\nslope=", slope_lbl, "  R\u00b2=", r2_lbl, "  [", row$flag, "]")
-    if (is_split(row)) lbl <- paste0(lbl, "\ndiffusion=", formatC(row$slope_diffusion, digits = 3, format = "g"),
-                                     "  {", row$ch4_flag, "}")
-    lbl
+    fit_lbl <- paste0("R\u00b2=", if (!is.na(row$r_square)) round(row$r_square, 3) else "NA", "  [", row$flag, "]")
+    if ("ch4_flag" %in% names(row) && !startsWith(row$ch4_flag, "no bubble"))
+      return(paste0(row$site, "\ntotal=", num(row$slope_total), "  ebullition=", num(row$slope_ebullition),
+                    "\ndiffusion=", num(row$slope_diffusion), "  ", fit_lbl, "\n{", row$ch4_flag, "}"))
+    paste0(row$site, "\nslope=", num(row$slope, 5), "  ", fit_lbl)
   }
 
-  # Build per-measurement window and fitted-line data
-  window_list <- vector("list", nrow(regression_result))
-  fitted_list <- vector("list", nrow(regression_result))
+  # one panel per window and gas, keyed by row number (sites may share a label)
+  n <- nrow(regression_result)
+  gases <- c(ghg, second_gas)
+  panel_id <- function(i, g) paste(i, g)
+  panel_lbl <- character(0)
+  pts <- lns <- bub <- sec <- list()
 
-  for (i in seq_len(nrow(regression_result))) {
+  for (i in seq_len(n)) {
     row  <- regression_result[i, ]
     flag <- row$flag
-    st   <- as.POSIXct(row$start_time, format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
-    et   <- as.POSIXct(row$end_time,   format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
-    site_label <- label_of(row)
-
-    empty_win <- data.frame(site_label = character(0), elapsed_s = numeric(0),
-                            conc = numeric(0), flag = character(0),
-                            stringsAsFactors = FALSE)
-    empty_fit <- data.frame(site_label = character(0), elapsed_s = numeric(0),
-                            fitted = numeric(0), flag = character(0),
-                            stringsAsFactors = FALSE)
-
-    if (is.na(st) || is.na(et)) {
-      window_list[[i]] <- empty_win
-      fitted_list[[i]] <- empty_fit
-      next
-    }
+    panel_lbl[panel_id(i, ghg)] <- if (is.null(second_gas)) label_of(row) else
+      sub("\n", paste0("  ", unit_of(ghg), "\n"), label_of(row), fixed = TRUE)
+    if (!is.null(second_gas)) panel_lbl[panel_id(i, second_gas)] <- paste0(row$site, "\n", unit_of(second_gas))
+    st <- as_time(row$start_time)
+    et <- as_time(row$end_time)
+    if (is.na(st) || is.na(et)) next
 
     win <- data[data$real_datetime >= st & data$real_datetime <= et, ]
     win <- win[order(win$real_datetime), ]
-
-    if (nrow(win) < 2) {
-      window_list[[i]] <- empty_win
-      fitted_list[[i]] <- empty_fit
-      next
-    }
+    win <- win[!is.na(win[[ghg]]), ]
+    if (nrow(win) < 2) next
 
     elapsed_s <- as.numeric(difftime(win$real_datetime, win$real_datetime[1], units = "secs"))
     conc_vec  <- as.numeric(win[[ghg]])
+    pid <- panel_id(i, ghg)
+    pts[[length(pts) + 1]] <- data.frame(panel = pid, elapsed_s = elapsed_s, conc = conc_vec)
+    if (!is.null(second_gas))
+      sec[[length(sec) + 1]] <- data.frame(panel = panel_id(i, second_gas), elapsed_s = elapsed_s,
+                                           conc = as.numeric(win[[second_gas]]))
 
-    window_list[[i]] <- data.frame(site_label = site_label, elapsed_s = elapsed_s,
-                                   conc = conc_vec, flag = flag,
-                                   stringsAsFactors = FALSE)
+    if ("bubble_spans" %in% names(row) && !is.na(row$bubble_spans)) {
+      sp <- matrix(as.numeric(unlist(strsplit(strsplit(row$bubble_spans, "; ")[[1]], "-"))), ncol = 2, byrow = TRUE)
+      in_bub <- vapply(elapsed_s, function(x) any(x >= sp[, 1] - 0.05 & x <= sp[, 2] + 0.05), logical(1))
+      if (any(in_bub)) bub[[length(bub) + 1]] <- data.frame(panel = pid, elapsed_s = elapsed_s[in_bub],
+                                                           conc = conc_vec[in_bub])
+    }
 
-    # Fitted line over 200 evenly spaced points
     elapsed_seq <- seq(min(elapsed_s), max(elapsed_s), length.out = 200)
-    C0          <- conc_vec[1]
-
+    model <- if ("fit_used" %in% names(row) && !is.na(row$fit_used)) row$fit_used else fit_type
     if (is_split(row)) {
-      ds <- as.POSIXct(row$diffusion_start, format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
-      de <- as.POSIXct(row$diffusion_end,   format = "%Y/%m/%d %H:%M:%S", tz = "Asia/Taipei")
-      seg <- win$real_datetime >= ds & win$real_datetime <= de
-      elapsed_seq <- seq(min(elapsed_s[seg]), max(elapsed_s[seg]), length.out = 200)
-      fit    <- stats::lm(y ~ x, data.frame(x = elapsed_s[seg], y = conc_vec[seg]))
-      fitted <- stats::predict(fit, newdata = data.frame(x = elapsed_seq))
-    } else if (fit_type == "linear") {
-      fit    <- stats::lm(conc_vec ~ elapsed_s)
-      fitted <- stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq))
-    } else if (fit_type == "quadratic") {
+      seg <- win$real_datetime >= as_time(row$diffusion_start) & win$real_datetime <= as_time(row$diffusion_end)
+      if (sum(seg) >= 2) {
+        elapsed_seq <- seq(min(elapsed_s[seg]), max(elapsed_s[seg]), length.out = 200)
+        fit    <- stats::lm(y ~ x, data.frame(x = elapsed_s[seg], y = conc_vec[seg]))
+        fitted <- stats::predict(fit, newdata = data.frame(x = elapsed_seq))
+      } else fitted <- rep(NA_real_, 200)
+    } else if (has_total(row)) {
+      fitted <- rep(NA_real_, 200)  # total only: no diffusion line
+    } else if (model == "quadratic") {
       fit    <- stats::lm(conc_vec ~ elapsed_s + I(elapsed_s^2))
       fitted <- stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq))
-    } else {
-      ef <- .exp_curve_fit(conc_vec, elapsed_s, zhao = fit_type == "exp_zhao18")
+    } else if (model %in% c("exp_tz", "exp_zhao18")) {
+      ef <- .exp_curve_fit(conc_vec, elapsed_s, zhao = model == "exp_zhao18")
       u  <- elapsed_seq - if (is.null(ef)) 0 else ef$t0
       fitted <- if (is.null(ef)) rep(NA_real_, 200) else
         ef$Cm + ef$a * u + (ef$C0 - ef$Cm) * exp(-ef$b * u)
+    } else {
+      fit    <- stats::lm(conc_vec ~ elapsed_s)
+      fitted <- stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq))
     }
-
-    fitted_list[[i]] <- data.frame(site_label = site_label, elapsed_s = elapsed_seq,
-                                   fitted = fitted, flag = flag,
-                                   stringsAsFactors = FALSE)
+    lns[[length(lns) + 1]] <- data.frame(panel = pid, elapsed_s = elapsed_seq, fitted = fitted,
+                                         flag = flag, line = "fit / diffusion")
+    if (has_total(row)) {
+      t0 <- as.numeric(difftime(as_time(row$total_start), win$real_datetime[1], units = "secs"))
+      lns[[length(lns) + 1]] <- data.frame(panel = pid, elapsed_s = c(t0, max(elapsed_s)),
+                                           fitted = c(row$total_start_conc, row$total_end_conc),
+                                           flag = NA_character_, line = "total (two-point)")
+    }
   }
 
-  all_windows <- do.call(rbind, window_list)
-  all_fitted  <- do.call(rbind, fitted_list)
+  if (!length(pts)) {
+    warning("plot_ghg_flux(): no window has ", ghg, " readings in data; returning NULL.")
+    return(NULL)
+  }
+  levels_panel <- as.vector(t(outer(seq_len(n), gases, panel_id)))
+  levels_panel <- levels_panel[levels_panel %in% unlist(lapply(c(pts, sec), `[[`, "panel"))]
+  fac <- function(d) { d <- do.call(rbind, d); if (!is.null(d)) d$panel <- factor(d$panel, levels_panel); d }
+  pts <- fac(pts); lns <- fac(lns); bub <- fac(bub); sec <- fac(sec)
+  lns <- lns[!is.na(lns$fitted), ]
 
-  if (nrow(all_windows) == 0) return(NULL)
+  colors <- flag_colors[names(flag_colors) %in% lns$flag]
 
-  # Preserve site_label order as it appears in regression_result
-  site_label_order <- vapply(seq_len(nrow(regression_result)),
-                             function(i) label_of(regression_result[i, ]), character(1))
-
-  all_windows$site_label <- factor(all_windows$site_label, levels = unique(site_label_order))
-  all_fitted$site_label  <- factor(all_fitted$site_label,  levels = unique(site_label_order))
-
-  used_colors <- flag_colors[names(flag_colors) %in% unique(c(all_windows$flag, all_fitted$flag))]
-
-  ggplot2::ggplot() +
-    ggplot2::geom_point(data  = all_windows,
-                        ggplot2::aes(x = elapsed_s, y = conc,   color = flag),
-                        size  = 0.6, alpha = 0.5) +
-    ggplot2::geom_line(data   = all_fitted,
-                       ggplot2::aes(x = elapsed_s, y = fitted,  color = flag),
-                       linewidth = 0.9) +
-    ggplot2::scale_color_manual(values = used_colors) +
-    ggplot2::facet_wrap(~ site_label, scales = "free_y") +
-    ggplot2::labs(x = "Elapsed time (s)", y = paste0(ghg, " (ppm)"), color = "Flag") +
-    ggplot2::theme_bw() +
-    ggplot2::theme(strip.text      = ggplot2::element_text(size = 7.5),
-                   legend.position = "bottom")
+  # solid marks on a dark grey panel (all >= 3:1 contrast to it); colour is kept for the fit's flag,
+  # bubble readings differ from the ok line by shape as well as colour
+  bg <- "#383838"
+  reading <- function(d) ggplot2::geom_point(data = d, ggplot2::aes(x = elapsed_s, y = conc), shape = 16,
+                                             color = "#a8a8a8", size = 0.9, alpha = 0.8, na.rm = TRUE)
+  p <- ggplot2::ggplot() + reading(pts)
+  if (!is.null(sec)) p <- p + reading(sec)
+  if (!is.null(bub))
+    p <- p + ggplot2::geom_point(data = bub, ggplot2::aes(x = elapsed_s, y = conc, shape = "bubble reading"),
+                                 color = "#e07a5f", size = 1.4) +
+      ggplot2::scale_shape_manual(values = c(`bubble reading` = 17))
+  if (nrow(lns)) {
+    fl <- lns[lns$line == "fit / diffusion", ]
+    tl <- lns[lns$line != "fit / diffusion", ]
+    p <- p + ggplot2::geom_line(data = fl, ggplot2::aes(x = elapsed_s, y = fitted, color = flag,
+                                                        linetype = line), linewidth = 1.2)
+    if (nrow(tl))
+      p <- p + ggplot2::geom_line(data = tl, ggplot2::aes(x = elapsed_s, y = fitted, linetype = line),
+                                  color = "white", linewidth = 0.6)
+    # line-type key only when a total line is drawn (bubble closures); else it explains nothing
+    p <- p + ggplot2::scale_linetype_manual(values = c(`fit / diffusion` = "solid", `total (two-point)` = "22"),
+                                            guide = if (nrow(tl)) ggplot2::guide_legend(override.aes = list(color = "white")) else "none")
+  }
+  p +
+    ggplot2::scale_color_manual(values = colors, labels = function(x) paste("fit:", x)) +
+    ggplot2::facet_wrap(~ panel, scales = "free_y", ncol = if (is.null(second_gas)) NULL else 2,
+                        labeller = ggplot2::as_labeller(panel_lbl)) +
+    ggplot2::labs(x = "Elapsed time (s)", y = if (is.null(second_gas)) unit_of(ghg) else "Concentration",
+                  color = NULL, linetype = NULL, shape = NULL) +
+    .aelab_theme("minimal", base_size, "white") +
+    # default font: Century Gothic is missing from the PDF device and errors there (R CMD check);
+    # dark grey background, not the theme's transparent one
+    ggplot2::theme(text = ggplot2::element_text(family = ""),
+                   plot.background = ggplot2::element_rect(fill = bg, color = NA),
+                   panel.grid = ggplot2::element_line(color = "#4d4d4d"),
+                   panel.grid.minor = ggplot2::element_line(color = "#424242"))
 }
 
 #' @title calculate_ghg_flux
@@ -1704,7 +1755,9 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   first <- tt < edge_s
   last <- tt > max(tt) - edge_s
   clamp <- function(x, ref) min(max(x, min(ref)), max(ref))
-  (clamp(max(sm[last]), conc[last]) - clamp(min(sm[first]), conc[first])) / max(tt)
+  c0 <- clamp(min(sm[first]), conc[first])
+  c1 <- clamp(max(sm[last]), conc[last])
+  c(slope = (c1 - c0) / max(tt), c0 = c0, c1 = c1)
 }
 
 # Total / diffusion / ebullition split of one CH4 closure (Minaudo et al. 2026, pp. 3-4).
@@ -1713,7 +1766,9 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   out <- data.frame(total = NA_real_, diffusion = NA_real_, ebullition = NA_real_,
                     n_bubbles = NA_integer_, ch4_flag = "too few readings",
                     diff_r2 = NA_real_, diff_cor = NA_real_, diff_se = NA_real_,
-                    diff_start = NA_real_, diff_end = NA_real_, total_s = NA_real_)
+                    diff_start = NA_real_, diff_end = NA_real_, total_s = NA_real_,
+                    total_t0 = NA_real_, total_c0 = NA_real_, total_c1 = NA_real_,
+                    bubble_spans = NA_character_)
   o <- order(time)
   time <- time[o]; conc <- conc[o]
   keep <- !duplicated(time)
@@ -1723,7 +1778,13 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
 
   flag <- .find_ch4_bubbles(tt, conc, opt$bubble_window, opt$bubble_align, opt$bubble_prob,
                             merge_gap = opt$merge_gap, min_len = opt$min_len)
+  spans <- function(f) {
+    r <- rle(f); e <- cumsum(r$lengths); s <- e - r$lengths + 1
+    if (any(f)) paste(sprintf("%g-%g", round(tt[s[r$values]], 1), round(tt[e[r$values]], 1)),
+                      collapse = "; ") else NA_character_
+  }
   out$n_bubbles <- sum(rle(flag)$values)
+  out$bubble_spans <- spans(flag)
   no_bubble <- function(label) {
     s <- .lm_ch4(tt, conc)[["slope"]]
     out[c("total", "diffusion", "ebullition", "ch4_flag")] <- list(s, s, 0, label)
@@ -1731,7 +1792,9 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   }
   if (!any(flag)) return(no_bubble("no bubble"))
 
-  window_total <- .total_ch4(tt, conc, opt$spar, opt$nknots_ratio)
+  tot <- .total_ch4(tt, conc, opt$spar, opt$nknots_ratio)
+  window_total <- tot[["slope"]]
+  out[c("total_t0", "total_c0", "total_c1")] <- list(time[1], tot[["c0"]], tot[["c1"]])
   out$total_s <- max(tt)
   t_early <- if (opt$early_from == "placement") time[which(flag)[1]] - t_ref else tt[which(flag)[1]]
   if (t_early <= opt$early_s) {
@@ -1744,12 +1807,16 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   if (opt$min_rise > 0) {
     flag <- .drop_small_bubbles(conc, flag, opt$min_rise)
     out$n_bubbles <- sum(rle(flag)$values)
-    if (!any(flag)) return(no_bubble("no bubble: rises <= min_rise"))
+    if (!any(flag)) {
+      out[c("total_t0", "total_c0", "total_c1", "bubble_spans")] <- list(NA_real_, NA_real_, NA_real_, NA_character_)
+      return(no_bubble("no bubble: rises <= min_rise"))
+    }
   }
   if (opt$bubble_pad > 0) {
     ft <- tt[flag]  # pad in seconds
     flag <- flag | vapply(tt, function(x) any(abs(x - ft) <= opt$bubble_pad), logical(1))
   }
+  out$bubble_spans <- spans(flag)
 
   excl <- flag
   if (isTRUE(opt$trim_to_min) && any(!flag & tt < max(tt) / 2)) {
@@ -1768,7 +1835,9 @@ calculate_ghg_flux <- function(data, slope = "slope", area = "area", volume = "v
   d <- seg$fit[["slope"]]
   from <- tt >= seg$fit[["start"]]
   if (opt$total_from == "segment" && sum(from) >= 20) {
-    out$total <- .total_ch4(tt[from], conc[from], opt$spar, opt$nknots_ratio)
+    tot <- .total_ch4(tt[from], conc[from], opt$spar, opt$nknots_ratio)
+    out$total <- tot[["slope"]]
+    out[c("total_t0", "total_c0", "total_c1")] <- list(time[from][1], tot[["c0"]], tot[["c1"]])
     out$total_s <- max(tt) - seg$fit[["start"]]
   } else out$total <- window_total
   ebul <- out$total - d

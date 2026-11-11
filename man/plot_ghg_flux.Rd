@@ -10,8 +10,10 @@ plot_ghg_flux(
   ghg,
   fit_type = "linear",
   t_zero = 0,
-  flag_colors = c(ok = "#2ca25f", discard = "#fc8d59", zero = "#74c7ef", no_data =
-    "#aaaaaa")
+  flag_colors = c(ok = "#8ab29a", discard = "#f2cc8f", zero = "#f2cc8f", no_data =
+    "#aaaaaa"),
+  second_gas = NULL,
+  base_size = 11
 )
 }
 \arguments{
@@ -21,24 +23,34 @@ plot_ghg_flux(
 
 \item{ghg}{Column name in \code{data} for the gas concentration (e.g. \code{"CH4"}, \code{"N2O"}).}
 
-\item{fit_type}{Model used to draw the fitted line. Should match the \code{fit_type} used in
-\code{calculate_regression()}. One of \code{"linear"} (default), \code{"exp_tz"},
-\code{"exp_zhao18"}.}
+\item{fit_type}{Model used for windows without a \code{fit_used} value (results from older
+versions). One of \code{"linear"} (default), \code{"quadratic"}, \code{"exp_tz"},
+\code{"exp_zhao18"}, \code{"auto"} (drawn as linear).}
 
 \item{t_zero}{Reference time in seconds for \code{"exp_tz"} slope. Default 0.}
 
 \item{flag_colors}{Named character vector mapping flag values to colors.}
+
+\item{second_gas}{Optional column name in \code{data} (e.g. \code{"CO2"}) drawn in a panel
+beside each window, same time axis, readings only. A jump in both gases at once points to a
+chamber disturbance rather than a bubble (Minaudo et al. 2026, Guideline 5, p. 10).
+Default \code{NULL} (none).}
+
+\item{base_size}{Base font size of the aelab minimal theme (as \code{\link{plot_point}}). Default 11.}
 }
 \value{
-A \code{ggplot} object with one facet per site. Each panel shows raw concentration
-  points and the fitted line, with strip text showing slope, R\eqn{^2}, and flag.
+A \code{ggplot} object with one panel per window (two with \code{second_gas}), or
+  \code{NULL} with a warning when no window has readings. The y axis gives the unit from
+  \code{slope_unit} or the \code{<gas>_unit} column of \code{tidy_ghg_analyzer()}.
 }
 \description{
 Plot GHG concentration over time for each measurement window, overlaid with the
-  fitted regression line and colored by quality flag. Use this for visual QC of
-  \code{\link{calculate_regression}} output. For CH4 closures split with
-  \code{bubble_detection = TRUE}, the line is the linear diffusion fit over its segment and the
-  panel title adds the diffusion slope and \code{ch4_flag}.
+  fitted line, colored by its quality flag (\code{flag}). Use this for visual QC of
+  \code{\link{calculate_regression}} output. Each window is drawn with the model in its
+  \code{fit_used} column. For CH4 closures split with \code{bubble_detection = TRUE}, the solid
+  line is the linear diffusion fit over its segment (its colour is the diffusion fit's flag), the dashed white line is the two-point total
+  (Minaudo et al. 2026, Eq. 1, p. 3), readings flagged as bubbles are coral triangles, and the
+  panel title adds the total, diffusion and ebullition slopes and \code{ch4_flag}.
 }
 \examples{
 data(n2o)

@@ -103,6 +103,36 @@
 
 ## Modified functions
 
+* `plot_ghg_flux()`:
+  - Draws each window with the model in its `fit_used` column. Before, it always used
+    `fit_type`, default `"linear"`, so quadratic fits were drawn as straight lines. `fit_type` now
+    only applies to results without `fit_used`, and `"auto"` is accepted (it was an error).
+  - The y axis gives the unit (ppm or ppb) from `slope_unit` or the `<gas>_unit` column; it always
+    said ppm.
+  - Readings are solid light grey points; only the fitted line is coloured by `flag`. For CH4 bubble closures that
+    line is the diffusion fit, which is what `flag` and `r_square` describe.
+  - For CH4 bubble closures, it draws flagged readings as coral triangles and the two-point total as
+    a dashed white line. The panel title gives the total and ebullition on one line and the diffusion
+    with its R² and flag on the next (it showed the total twice, as `slope` and `total`).
+  - New `second_gas` (default `NULL`) draws e.g. CO2 beside each window. A jump in both gases at
+    once points to a chamber disturbance rather than a bubble (Minaudo et al. 2026, Guideline 5,
+    p. 10).
+  - Uses the aelab minimal theme (as `plot_point(style = "minimal")`; new `base_size`, default 11)
+    on a dark grey background with white text and the default font. Colours: readings
+    grey `"#a8a8a8"`, bubble readings `"#e07a5f"`. The `flag_colors` defaults are now
+    `"#8ab29a"` for `ok` (was green `"#2ca25f"`) and `"#f2cc8f"` for both `discard` and `zero`
+    (were orange `"#fc8d59"` and blue `"#74c7ef"`), since both need a look.
+  - The line-type key (fit / diffusion, total) is shown only when a total line is drawn.
+  - Warns when no window has readings (it returned `NULL` silently), and keeps windows with the
+    same label apart.
+* The `n2o` dataset has an `N2O_unit` column (`"ppb"`), as `tidy_ghg_analyzer()` output, so its
+  examples carry `slope_unit = "ppb s-1"` and plots label the axis "N2O (ppb)".
+* `calculate_regression(bubble_detection = TRUE)` returns `bubble_spans`, `total_start`,
+  `total_start_conc` and `total_end_conc` for the plot. No values change.
+* `calculate_regression()` and `plot_ghg_flux()` read `date_time` (data without `real_datetime`)
+  as Asia/Taipei clock time, as they already did for `real_datetime` and the reference times.
+  Before, on a computer not set to Asia/Taipei, every closure returned `no_data`. Unchanged on
+  Asia/Taipei systems.
 * `calculate_ghg_flux()` — new `conc_unit = c("ppm", "ppb")` (default `"ppm"`, unchanged).
   `"ppb"` divides slopes by 1000, so ppb slopes (LI-COR CH4/N2O from `tidy_ghg_analyzer()`) give
   mmol m-2 h-1 as labelled; before, they gave a value 1000 times too large under that label. A
