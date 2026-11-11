@@ -133,7 +133,8 @@ that the nonlinear model diverges strongly from the linear fit, which may signal
 artefacts or poor convergence. When this threshold is exceeded, the flag is overridden to
 \code{"discard"}. Default \code{NULL} (disabled). goFlux uses 2 as its default
 (\code{g.limit}; Rheault et al. 2024), but there it is two-sided (|g| > 2 or < 0.5) and switches to
-the linear flux rather than discarding; no published study justifies a value.}
+the linear flux rather than discarding. Leiber-Sauheitl et al. (2014, p. 753) accepted the
+nonlinear flux only when it was not more than 4 times the linear flux.}
 
 \item{min_deadband, max_deadband, deadband_step}{Only used when \code{window_type = "pareto"}.
 Define the candidate deadband (start-skip) grid in seconds, relative to the reference time:
@@ -367,11 +368,16 @@ Levy, P. E., et al. (2011). Quantification of uncertainty in trace gas fluxes me
 static chamber method. \emph{European Journal of Soil Science}, 62, 811-821.
 \doi{10.1111/j.1365-2389.2011.01403.x}
 
+Leiber-Sauheitl, K., Fuß, R., Voigt, C., & Freibauer, A. (2014). High CO2 fluxes from grassland
+on histic Gleysol along soil carbon and drainage gradients. \emph{Biogeosciences}, 11, 749-761.
+\doi{10.5194/bg-11-749-2014}
+
 Kobayashi, A. N. A., Roques, C., Hunkeler, D., & Brunner, P. (2026). Uncertainty
 quantification in soil gas fluxes: Reducing the user's arbitrariness. \emph{European Journal
 of Soil Science}, 77, e70415. \doi{10.1111/ejss.70415}
 
-Zrnic, T., & Fithian, W. (2025). Locally simultaneous inference. \emph{Annals of Statistics}.
+Zrnic, T., & Fithian, W. (2025). A flexible defense against the winner's curse. \emph{The Annals
+of Statistics}, 53(6). \doi{10.1214/25-AOS2553}
 The \code{window_type = "pareto"} \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi}
 interval applies a correction inspired by (not an implementation of) this paper's Section 4
 "effective Bonferroni" idea to the winner's-curse bias in the selected candidate's bootstrap

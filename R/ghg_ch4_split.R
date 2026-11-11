@@ -218,6 +218,8 @@
   out$diff_r1 <- if (length(e) > 2) stats::acf(e, lag.max = 1, plot = FALSE, na.action = stats::na.pass)$acf[2] else NA_real_
   ne <- length(e) * (1 - out$diff_r1) / (1 + out$diff_r1)
   out$diff_se <- if (isTRUE(ne > 2)) seg$fit[["se"]] * sqrt((length(e) - 2) / (ne - 2)) else NA_real_
+  # TODO: possibly fire only when d - total > diffusion SE (as the label below), so a difference inside
+  # the noise does not set review_needed (PT3-a, Fable review 1.12); no published multiplier, so unchanged
   labels <- c("diffusion > total flux"[d > out$total],
               # no SE (n_e <= 2): ebullition cannot be shown to exceed diffusion + SE, so review
               "ebullition < diffusion + SE"[d <= out$total && !isFALSE(ebul < d + out$diff_se)],

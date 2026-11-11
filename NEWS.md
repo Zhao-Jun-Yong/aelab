@@ -29,6 +29,9 @@
   the GWPs used and the total.
 * Help of `calculate_regression()`: the five pareto columns are always present (`NA` unless
   `window_type = "pareto"`).
+* `fit_type = "auto"`: the unsourced fallback `kmax = 1.5 / duration` is gone; `kmax` is always
+  `|slope_lm| / precision` (a flat line gives 0). Reached only with a zero linear slope, where the
+  exponential was already rejected.
 
 ## `convert_ghg_unit()`
 

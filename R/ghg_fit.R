@@ -74,7 +74,6 @@
 #                       using the H\u00fcppi et al. (2018) formula: kmax = |slope_lm| / precision.
 .fit_ghg_model <- function(conc, elapsed_s, fit_type, t_zero,
                            kappamax = NULL, instrument_precision = NULL) {
-  C0     <- conc[1]
   ss_tot <- sum((conc - mean(conc))^2)
 
   .lm_result <- function() {
@@ -128,18 +127,15 @@
   }
 
   if (fit_type == "auto") {
-    duration_s <- max(elapsed_s) - min(elapsed_s)
-
     # Step 1: linear (baseline)
     best     <- .lm_result()
     lm_slope <- best$slope  # saved for g-factor computation
 
     # kappamax (H\u00fcppi et al. 2018): reject exp_tz if b > |slope_lm| / precision.
     # Strong fluxes tolerate more curvature; near-detection-limit measurements stay linear.
-    kmax <- if (!is.null(instrument_precision) && !is.na(best$slope) && abs(best$slope) > 0)
-      abs(best$slope) / instrument_precision
-    else
-      1.5 / max(duration_s, 1)
+    # A flat line gives kmax = 0, so it stays linear (as goFlux k.max and fluxible's kappamax).
+    if (is.null(instrument_precision)) stop("fit_type = \"auto\" needs instrument_precision.")
+    kmax <- abs(best$slope) / instrument_precision
 
     # A more complex model is accepted only if its AICc is lower (Kutzbach et al. 2007, p. 1011;
     # Leiber-Sauheitl et al. 2014, p. 753; goFlux best.flux "AICc" criterion).

@@ -226,6 +226,14 @@ test_that("calculate_regression exp_tz fits exponential signal and returns posit
   expect_gt(result$slope, 0)
 })
 
+test_that("auto: a flat line gives slope 0 (kmax = 0), precision is required", {
+  tt <- 0:299
+  a <- .fit_ghg_model(rep(400, 300), tt, "auto", t_zero = 0, instrument_precision = 0.5)
+  expect_equal(a$slope, 0)
+  expect_equal(a$b_param, NA_real_)
+  expect_error(.fit_ghg_model(400 + 0.01 * tt, tt, "auto", t_zero = 0), "instrument_precision")
+})
+
 test_that("exponential fits recover the initial slope A*b of noisy saturating curves", {
   # C = 400 + A(1 - exp(-b t)), 1 Hz, 300 s, noise sd 0.5: true slope at t = 0 is A * b.
   # The old fixed nls start (b = 0.001) returned 0.08 for a true slope of 1.

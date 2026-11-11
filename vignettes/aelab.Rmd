@@ -567,6 +567,16 @@ Gaudard, J., Telford, R. J., & Halbritter, A. H. (2025). fluxible: An R package 
 
 Hüppi, R., Felber, R., Krauss, M., Six, J., Leifeld, J., & Fuß, R. (2018). Restricting the nonlinearity parameter in soil greenhouse gas flux calculations for more reliable flux estimates. PLOS ONE, 13(7), e0200876. https://doi.org/10.1371/journal.pone.0200876
 
+Kutzbach, L., Schneider, J., Sachs, T., Giebels, M., Nykänen, H., Shurpali, N. J., Martikainen, P. J., Alm, J., & Wilmking, M. (2007). CO2 flux determination by closed-chamber methods can be seriously biased by inappropriate application of linear regression. Biogeosciences, 4(6), 1005–1025. https://doi.org/10.5194/bg-4-1005-2007
+
+Levy, P. E., Gray, A., Leeson, S. R., Gaiawyn, J., Kelly, M. P. C., Cooper, M. D. A., Dinsmore, K. J., Jones, S. K., & Sheppard, L. J. (2011). Quantification of uncertainty in trace gas fluxes measured by the static chamber method. European Journal of Soil Science, 62(6), 811–821. https://doi.org/10.1111/j.1365-2389.2011.01403.x
+
+Minaudo, C., et al. (2026). Uncertainty in aquatic greenhouse gas flux estimates arises from subjective processing of floating chamber time series. Limnology and Oceanography: Methods, 24, e70054. https://doi.org/10.1002/lom3.70054
+
+Minaudo, C. (2026). camilleminaudo/ghg-flux-expert: Code to reproduce results from Minaudo et al., 2026 (v1.0). Zenodo. https://doi.org/10.5281/zenodo.18710431
+
+Sø, J. S., et al. (2024). Self-made equipment for automatic methane diffusion and ebullition measurements from aquatic environments. Journal of Geophysical Research: Biogeosciences, 129, e2024JG008035. https://doi.org/10.1029/2024JG008035
+
 Staehr, P. A., Bade, D., Van de Bogert, M. C., Koch, G. R., Williamson, C., Hanson, P., Cole, J. J., & Kratz, T. (2010). Lake metabolism and the diel oxygen technique: State of the science. Limnology and Oceanography: Methods, 8(11), 628–644. https://doi.org/10.4319/lom.2010.8.0628
 
 Yong, Z.-J., Lin, W.-J., Lin, C.-W., & Lin, H.-J. (2024). Tidal influence on carbon dioxide and methane fluxes from tree stems and soils in mangrove forests. Biogeosciences, 21(22), 5247–5260. https://doi.org/10.5194/bg-21-5247-2024
