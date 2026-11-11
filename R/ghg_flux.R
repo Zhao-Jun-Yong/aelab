@@ -187,6 +187,24 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
        C0 = if (zhao) C0 else cf[[1]] + cf[[3]], residuals = f$residuals)
 }
 
+# Linear or quadratic least-squares fit of concentration on elapsed seconds: the one place both
+# the regression (.fit_ghg_model) and the plot (.model_curve) fit these models.
+.poly_fit <- function(conc, elapsed_s, quadratic = FALSE) {
+  if (quadratic) stats::lm(conc ~ elapsed_s + I(elapsed_s^2)) else stats::lm(conc ~ elapsed_s)
+}
+
+# Fitted curve of `model` ("linear", "quadratic", "exp_tz", "exp_zhao18") on the readings, at the
+# times `at` (s); NA where an exponential model has no usable fit.
+.model_curve <- function(model, conc, elapsed_s, at) {
+  if (model %in% c("exp_tz", "exp_zhao18")) {
+    ef <- .exp_curve_fit(conc, elapsed_s, zhao = model == "exp_zhao18")
+    if (is.null(ef)) return(rep(NA_real_, length(at)))
+    u <- at - ef$t0
+    return(ef$Cm + ef$a * u + (ef$C0 - ef$Cm) * exp(-ef$b * u))
+  }
+  stats::predict(.poly_fit(conc, elapsed_s, model == "quadratic"), newdata = data.frame(elapsed_s = at))
+}
+
 # Internal helper: fit a GHG concentration curve and return slope, R\u00b2, curvature b, and fit_used.
 # kappamax:            if provided and b > kappamax, exponential fits fall back to linear.
 # instrument_precision: only used when fit_type = "auto" to compute kappamax per window
@@ -197,14 +215,14 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
   ss_tot <- sum((conc - mean(conc))^2)
 
   .lm_result <- function() {
-    fit <- stats::lm(conc ~ elapsed_s)
+    fit <- .poly_fit(conc, elapsed_s)
     list(slope = unname(stats::coef(fit)[2]), r_square = summary(fit)$r.squared,
          b_param = NA_real_, fit_used = "linear", residuals = stats::residuals(fit),
          kmax_used = NA_real_)
   }
 
   .quad_result <- function() {
-    fit <- stats::lm(conc ~ elapsed_s + I(elapsed_s^2))
+    fit <- .poly_fit(conc, elapsed_s, quadratic = TRUE)
     list(slope = unname(stats::coef(fit)[2]), r_square = summary(fit)$r.squared,
          b_param = NA_real_, fit_used = "quadratic", residuals = stats::residuals(fit),
          kmax_used = NA_real_, curvature = unname(stats::coef(fit)[3]))
@@ -237,7 +255,7 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
                                   b_param = NA_real_, fit_used = fit_type,
                                   residuals = NA_real_, kmax_used = NA_real_))
     if (!is.null(kappamax) && res$b_param > kappamax) {
-      lin <- stats::lm(conc ~ elapsed_s)
+      lin <- .poly_fit(conc, elapsed_s)
       return(list(slope    = unname(stats::coef(lin)[2]),
                   r_square = summary(lin)$r.squared,
                   b_param  = res$b_param, fit_used = "linear",
@@ -926,43 +944,11 @@ calculate_regression <- function(data, reference_df, ghg,
 
   fit_type    <- match.arg(fit_type,    c("linear", "quadratic", "exp_tz", "exp_zhao18", "auto"))
   window_type <- match.arg(window_type, c("sliding", "fixed", "pareto"))
-  if (!isTRUE(bubble_detection) && !isFALSE(bubble_detection)) stop("bubble_detection must be TRUE or FALSE.")
-  ch4_opt <- .ch4_options(ch4_options)  # checked even when unused, to catch typos
-  if (bubble_detection && window_type != "fixed")
-    stop("bubble_detection = TRUE needs window_type = \"fixed\": sliding and pareto windows pick ",
-         "the best-fitting stretch, which avoids the bubbles.")
-  if (bubble_detection && toupper(ghg) != "CH4")
-    warning("bubble_detection = TRUE is meant for CH4 ebullition; splitting ", ghg, " anyway.", call. = FALSE)
-  if (!is.numeric(min_obs) || length(min_obs) != 1 || is.na(min_obs) || min_obs < 1)
-    stop("min_obs must be a single number >= 1.")
-  # a fit needs a residual degree of freedom: 2 readings always give a line with R2 = 1
-  need <- max(min_obs, .n_fit_params(fit_type) + 1L)
-  if (window_type == "sliding" && num_rows < need)
-    stop("num_rows (", num_rows, ") is below min_obs or the readings ", fit_type, " needs (", need, ").")
-  if (!ghg %in% names(data))
-    stop("`data` has no column \"", ghg, "\"",
-         if (toupper(ghg) %in% names(data)) paste0("; did you mean \"", toupper(ghg), "\"?") else ".")
-  miss <- setdiff(c(reference_time, site, "analyzer"), names(reference_df))
-  if (length(miss)) stop("`reference_df` has no column(s): ", paste(miss, collapse = ", "), ".")
-  if (!inherits(reference_df[[reference_time]], "POSIXct"))
-    stop("`reference_df$", reference_time, "` must be date-times (POSIXct), e.g. from lubridate::ymd_hms().")
-  # plain text, not a regex: "1337+1098" must match itself
-  keep <- stringr::str_detect(as.character(reference_df$analyzer),
-                              stringr::fixed(analyzer_code, ignore_case = TRUE)) %in% TRUE
-  if (!any(keep)) warning("No `reference_df$analyzer` contains \"", analyzer_code, "\": no rows returned.",
-                          call. = FALSE)
-  reference_df <- reference_df[keep, , drop = FALSE]
-
-  # fit_type = "auto" (kappamax) and window_type = "pareto" (fit_score sigma, bootstrap) need a
-  # precision: instrument_precision, else the <ghg>_prec column tidy_ghg_analyzer() adds, in the
-  # data's unit (as goFlux's prec argument and <gas>_prec columns; no guessing from analyzer names)
-  if ((fit_type == "auto" || window_type == "pareto") && is.null(instrument_precision)) {
-    p <- unique(stats::na.omit(data[[paste0(ghg, "_prec")]]))
-    if (length(p) != 1)
-      stop("fit_type = \"auto\" and window_type = \"pareto\" need instrument_precision, or one value in a `",
-           ghg, "_prec` column of `data` (added by tidy_ghg_analyzer() for LI-COR data).")
-    instrument_precision <- p
-  }
+  chk <- .check_regression_inputs(data, reference_df, ghg, reference_time, site, analyzer_code,
+                                  fit_type, window_type, bubble_detection, ch4_options, min_obs,
+                                  num_rows)
+  ch4_opt <- chk$ch4_opt; need <- chk$need; reference_df <- chk$reference_df
+  instrument_precision <- .resolve_precision(data, ghg, instrument_precision, fit_type, window_type)
 
   reference_time_vec <- lubridate::force_tz(reference_df[[reference_time]], tzone = "Asia/Taipei")
   reference_site     <- as.character(reference_df[[site]])
@@ -990,148 +976,45 @@ calculate_regression <- function(data, reference_df, ghg,
     dur_min_i     <- if (!is.na(duration_minutes_vec[i])) duration_minutes_vec[i] else duration_minutes
     start_off_i   <- if (!is.na(start_offset_s_vec[i])) start_offset_s_vec[i] else start_offset_s
 
-    start_time <- reference_datetime
-    end_time   <- reference_datetime + start_off_i + as.numeric(dur_min_i) * 60
+    cl <- .closure_readings(data, ghg, reference_datetime,
+                            reference_datetime + start_off_i + as.numeric(dur_min_i) * 60,
+                            reference_site[i])
+    sorted_data <- cl$sorted
 
-    valid_rows    <- !is.na(data$real_datetime) & !is.na(data[[ghg]])
-    filtered_data <- data[valid_rows & data$real_datetime >= start_time &
-                            data$real_datetime <= end_time, ]
-    sorted_data   <- filtered_data[order(filtered_data$real_datetime), ]
-    # concentration unit from tidy_ghg_analyzer()'s <ghg>_unit column, if any
-    u <- unique(stats::na.omit(sorted_data[[paste0(ghg, "_unit")]]))
-    if (length(u) > 1) stop("Mixed ", ghg, "_unit values for ", reference_site[i], ": ", paste(u, collapse = ", "))
-    slope_unit <- if (length(u) == 1) paste0(u, " s-1") else NA_character_
-    # first H2O reading of the closure, as goFlux's flux term (goFlux.R, H2O_flux.term)
-    h2o <- if ("H2O" %in% names(sorted_data)) stats::na.omit(as.numeric(sorted_data$H2O)) else numeric(0)
-    h2o_start <- if (length(h2o)) h2o[1] else NA_real_
-    if (anyDuplicated(sorted_data$real_datetime))
-      warning("Duplicated timestamps for ", reference_site[i], ": does `data` hold more than one ",
-              "analyzer? Pass one analyzer's readings per call.", call. = FALSE)
+    fit <- switch(window_type,
+      fixed = {
+        win_start <- reference_datetime + start_off_i
+        .fit_window_fixed(sorted_data, ghg, win_start, win_start + as.numeric(dur_min_i) * 60,
+                          need, fit_type, t_zero, kappamax, instrument_precision)
+      },
+      sliding = {
+        if (nrow(sorted_data) < num_rows) short_sites <<- c(short_sites, reference_site[i])
+        .fit_window_sliding(sorted_data, ghg, num_rows, fit_type, t_zero, kappamax,
+                            instrument_precision)
+      },
+      pareto = .fit_window_pareto(sorted_data, ghg, reference_datetime, fit_type, t_zero, kappamax,
+                                  instrument_precision, min_deadband, max_deadband, deadband_step,
+                                  min_window_size, cutoff_step, n_boot, need))
 
-    best_r_square  <- -Inf
-    best_slope     <- NA_real_
-    best_slope_lm  <- NA_real_
-    best_cor       <- NA_real_
-    best_b_param   <- NA_real_
-    best_fit_used  <- fit_type
-    best_start_dt  <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
-    best_end_dt    <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
+    if (window_type != "fixed" && !is.na(fit$start_dt))
+      fit$n_obs <- sum(sorted_data$real_datetime >= fit$start_dt & sorted_data$real_datetime <= fit$end_dt)
 
-    # pareto-only outputs; stay NA for "fixed"/"sliding"
-    deadband_out       <- NA_real_
-    cutoff_out          <- NA_real_
-    uncertainty_lo_out <- NA_real_
-    uncertainty_hi_out <- NA_real_
-    n_candidates_out    <- NA_integer_
-    force_discard        <- FALSE
-    n_obs_out            <- 0L
-
-    if (window_type == "fixed") {
-      win_start     <- reference_datetime + start_off_i
-      win_end       <- win_start + as.numeric(dur_min_i) * 60
-      selected_data <- sorted_data[sorted_data$real_datetime >= win_start &
-                                   sorted_data$real_datetime <= win_end, ]
-      n_obs_out     <- nrow(selected_data)
-
-      if (n_obs_out >= need) {
-        elapsed_s     <- as.numeric(difftime(selected_data$real_datetime,
-                                             selected_data$real_datetime[1],
-                                             units = "secs"))
-        conc_vec      <- as.numeric(selected_data[[ghg]])
-        fit_out       <- .fit_ghg_model(conc_vec, elapsed_s, fit_type, t_zero, kappamax,
-                                        instrument_precision)
-        best_r_square <- fit_out$r_square
-        best_slope    <- fit_out$slope
-        best_slope_lm <- if (!is.null(fit_out$slope_lm)) fit_out$slope_lm else NA_real_
-        best_b_param  <- fit_out$b_param
-        best_fit_used <- fit_out$fit_used
-        best_cor      <- if (!is.na(fit_out$r_square)) stats::cor(conc_vec, elapsed_s) else NA_real_
-        best_start_dt <- selected_data$real_datetime[1]
-        best_end_dt   <- selected_data$real_datetime[nrow(selected_data)]
-      }
-    } else if (window_type == "sliding") {
-      if (nrow(sorted_data) < num_rows) short_sites <<- c(short_sites, reference_site[i])
-      if (nrow(sorted_data) >= num_rows) {
-        for (j in 1:(nrow(sorted_data) - num_rows + 1)) {
-          selected_data <- sorted_data[j:(j + num_rows - 1), ]
-
-          elapsed_s <- as.numeric(difftime(selected_data$real_datetime,
-                                           selected_data$real_datetime[1],
-                                           units = "secs"))
-          conc_vec <- as.numeric(selected_data[[ghg]])
-
-          fit_out  <- .fit_ghg_model(conc_vec, elapsed_s, fit_type, t_zero, kappamax,
-                                     instrument_precision)
-          r_square <- fit_out$r_square
-
-          if (!is.na(r_square) && r_square > best_r_square) {
-            best_r_square <- r_square
-            best_slope    <- fit_out$slope
-            best_slope_lm <- if (!is.null(fit_out$slope_lm)) fit_out$slope_lm else NA_real_
-            best_b_param  <- fit_out$b_param
-            best_fit_used <- fit_out$fit_used
-            best_cor      <- stats::cor(conc_vec, elapsed_s)
-            best_start_dt <- selected_data$real_datetime[1]
-            best_end_dt   <- selected_data$real_datetime[nrow(selected_data)]
-          }
-        }
-      }
-    } else if (window_type == "pareto") {
-      .notify_pareto_experimental()
-      pw <- .pareto_select_window(sorted_data, ghg, reference_datetime,
-                                  fit_type, t_zero, kappamax, instrument_precision,
-                                  min_deadband, max_deadband, deadband_step,
-                                  min_window_size, cutoff_step, n_boot, need)
-      n_candidates_out <- pw$n_candidates
-
-      if (identical(pw$status, "no_candidates")) {
-        force_discard <- TRUE
-      } else if (identical(pw$status, "selected")) {
-        sel <- pw$selected
-        best_r_square      <- sel$r_square
-        best_slope         <- sel$slope
-        best_slope_lm      <- sel$slope_lm
-        best_b_param       <- sel$b_param
-        best_fit_used      <- sel$fit_used
-        best_cor           <- sel$cor
-        best_start_dt      <- sel$start_dt
-        best_end_dt        <- sel$end_dt
-        deadband_out       <- sel$deadband
-        cutoff_out          <- sel$cutoff
-        uncertainty_lo_out <- sel$uncertainty_lo
-        uncertainty_hi_out <- sel$uncertainty_hi
-      }
-      # status == "no_grid" (too little data): best_* stay at their NA/-Inf defaults,
-      # matching how "fixed"/"sliding" fall through to flag = "no_data" below.
-    }
-
-    if (window_type != "fixed" && !is.na(best_start_dt))
-      n_obs_out <- sum(sorted_data$real_datetime >= best_start_dt & sorted_data$real_datetime <= best_end_dt)
-
-    # Quality flag: correlation threshold distinguishes "zero" (no trend) from "discard" (poor fit).
     # For window_type = "pareto", an empty admitted-candidate pool is reported as "discard" rather
     # than falling through to "no_data" (data existed; no candidate window survived the fit).
-    qc_flag <- function(cor, r2) {
-      # cor is NA with a fit but constant readings: no trend, so "zero"
-      if (is.na(r2) || is.infinite(r2)) "no_data" else if (is.na(cor) || abs(cor) < cor_threshold) "zero" else
-        if (r2 >= r2_threshold) "ok" else "discard"
-    }
-    flag <- if (force_discard) "discard" else qc_flag(best_cor, best_r_square)
+    flag <- if (fit$force_discard) "discard" else
+      .qc_flag(fit$cor, fit$r_square, cor_threshold, r2_threshold)
 
     # Minimum detectable slope: marked, not used to override the flag. Low fluxes with a good fit
     # are kept as such (Gaudard et al. 2025, p. 4; fluxible SI Table A1) and sub-MDF fluxes
     # "should not be treated as zero fluxes or be discarded" (Maier et al. 2022, p. 457).
-    below_mdf <- NA
-    if (!is.null(instrument_precision) && !is.na(best_slope)) {
-      duration_s <- as.numeric(difftime(best_end_dt, best_start_dt, units = "secs"))
-      if (duration_s > 0) below_mdf <- abs(best_slope) < instrument_precision / duration_s
-    }
+    below_mdf <- .below_mdf(fit$slope, as.numeric(difftime(fit$end_dt, fit$start_dt, units = "secs")),
+                            instrument_precision)
 
     # g-factor: ratio of chosen slope to linear baseline slope (auto mode only).
     # Values far from 1 indicate the nonlinear model diverges strongly from linear.
-    g_factor <- if (!is.na(best_slope_lm) && !is.na(best_slope) &&
-                    best_slope_lm != 0 && best_fit_used != "linear")
-      best_slope / best_slope_lm
+    g_factor <- if (!is.na(fit$slope_lm) && !is.na(fit$slope) &&
+                    fit$slope_lm != 0 && fit$fit_used != "linear")
+      fit$slope / fit$slope_lm
     else NA_real_
 
     # g-factor threshold check: override "ok" to "discard" when divergence is too large.
@@ -1143,50 +1026,32 @@ calculate_regression <- function(data, reference_df, ghg,
     # CH4 split on the final window (Minaudo et al. 2026, pp. 3-4)
     split <- NULL
     if (bubble_detection) {
-      win <- if (is.na(best_start_dt)) sorted_data[0, ] else
-        sorted_data[sorted_data$real_datetime >= best_start_dt & sorted_data$real_datetime <= best_end_dt, ]
-      split <- .separate_ch4(as.numeric(win$real_datetime), as.numeric(win[[ghg]]), ch4_opt,
-                             as.numeric(reference_datetime))
-      split$regression <- best_slope
-      reg_qc <- list(r_square = best_r_square, correlation = best_cor, flag = flag, g_factor = g_factor)
-      if (startsWith(split$ch4_flag, "no bubble")) {
-        split$total <- split$diffusion <- best_slope  # keep the regression's own fit
-        split$diff_start <- as.numeric(best_start_dt)
-        split$diff_end <- as.numeric(best_end_dt)
-      } else if (!is.na(split$total)) {
-        best_slope <- split$total
-        g_factor <- NA_real_  # describes the regression curve, no longer the reported slope
-        # flag, r_square and correlation always describe the diffusion line; NA when there is
-        # none (total only), the regression's stay in *_regression
-        if (flag != "no_data") {
-          best_r_square <- split$diff_r2
-          best_cor <- split$diff_cor
-          flag <- if (is.na(split$diff_r2)) NA_character_ else qc_flag(best_cor, best_r_square)
-        }
-        if (!is.null(instrument_precision))
-          below_mdf <- if (split$total_s > 0) abs(best_slope) < instrument_precision / split$total_s else NA
-      }
+      m <- .merge_ch4_split(sorted_data, ghg, ch4_opt, reference_datetime, fit, flag, g_factor,
+                            below_mdf, instrument_precision, cor_threshold, r2_threshold)
+      split <- m$split; reg_qc <- m$reg_qc
+      fit$slope <- m$slope; fit$r_square <- m$r_square; fit$cor <- m$cor
+      flag <- m$flag; g_factor <- m$g_factor; below_mdf <- m$below_mdf
     }
 
     out <- tibble(
-      start_time           = format(best_start_dt, "%Y/%m/%d %H:%M:%S"),
-      end_time             = format(best_end_dt, "%Y/%m/%d %H:%M:%S"),
-      n_obs                = n_obs_out,
-      h2o_start            = h2o_start,
-      slope                = best_slope,
-      slope_unit           = slope_unit,
-      r_square             = best_r_square,
-      correlation          = best_cor,
-      b_param              = best_b_param,
-      fit_used             = best_fit_used,
+      start_time           = format(fit$start_dt, "%Y/%m/%d %H:%M:%S"),
+      end_time             = format(fit$end_dt, "%Y/%m/%d %H:%M:%S"),
+      n_obs                = fit$n_obs,
+      h2o_start            = cl$h2o_start,
+      slope                = fit$slope,
+      slope_unit           = cl$slope_unit,
+      r_square             = fit$r_square,
+      correlation          = fit$cor,
+      b_param              = fit$b_param,
+      fit_used             = fit$fit_used,
       g_factor             = g_factor,
       flag                 = flag,
       below_mdf            = below_mdf,
-      deadband             = deadband_out,
-      cutoff               = cutoff_out,
-      slope_uncertainty_lo = uncertainty_lo_out,
-      slope_uncertainty_hi = uncertainty_hi_out,
-      n_candidates         = n_candidates_out,
+      deadband             = fit$deadband,
+      cutoff               = fit$cutoff,
+      slope_uncertainty_lo = fit$uncertainty_lo,
+      slope_uncertainty_hi = fit$uncertainty_hi,
+      n_candidates         = fit$n_candidates,
       reference_time       = reference_time_vec[i],
       site                 = reference_site[i],
       analyzer             = reference_analyzer[i]
@@ -1198,7 +1063,7 @@ calculate_regression <- function(data, reference_df, ghg,
         g_factor_regression = reg_qc$g_factor, slope_total = split$total,
         slope_diffusion = split$diffusion, slope_diffusion_se = split$diff_se,
         diffusion_r1 = split$diff_r1,
-        n_obs_diffusion = if (startsWith(split$ch4_flag, "no bubble")) n_obs_out else split$diff_n,
+        n_obs_diffusion = if (startsWith(split$ch4_flag, "no bubble")) fit$n_obs else split$diff_n,
         slope_ebullition = split$ebullition,
         diffusion_start = format(as.POSIXct(split$diff_start, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
         diffusion_end = format(as.POSIXct(split$diff_end, tz = "Asia/Taipei"), "%Y/%m/%d %H:%M:%S"),
@@ -1215,6 +1080,194 @@ calculate_regression <- function(data, reference_df, ghg,
             paste(unique(short_sites), collapse = ", "), call. = FALSE)
   return(results)
 
+}
+
+# --- helpers of calculate_regression() ---------------------------------------------------------
+
+# Argument checks that need no per-closure data. Returns the validated CH4 options, the readings a
+# fit needs, and `reference_df` restricted to the rows of `analyzer_code`.
+.check_regression_inputs <- function(data, reference_df, ghg, reference_time, site, analyzer_code,
+                                     fit_type, window_type, bubble_detection, ch4_options, min_obs,
+                                     num_rows) {
+  if (!isTRUE(bubble_detection) && !isFALSE(bubble_detection)) stop("bubble_detection must be TRUE or FALSE.")
+  ch4_opt <- .ch4_options(ch4_options)  # checked even when unused, to catch typos
+  if (bubble_detection && window_type != "fixed")
+    stop("bubble_detection = TRUE needs window_type = \"fixed\": sliding and pareto windows pick ",
+         "the best-fitting stretch, which avoids the bubbles.")
+  if (bubble_detection && toupper(ghg) != "CH4")
+    warning("bubble_detection = TRUE is meant for CH4 ebullition; splitting ", ghg, " anyway.", call. = FALSE)
+  if (!is.numeric(min_obs) || length(min_obs) != 1 || is.na(min_obs) || min_obs < 1)
+    stop("min_obs must be a single number >= 1.")
+  # a fit needs a residual degree of freedom: 2 readings always give a line with R2 = 1
+  need <- max(min_obs, .n_fit_params(fit_type) + 1L)
+  if (window_type == "sliding" && num_rows < need)
+    stop("num_rows (", num_rows, ") is below min_obs or the readings ", fit_type, " needs (", need, ").")
+  if (!ghg %in% names(data))
+    stop("`data` has no column \"", ghg, "\"",
+         if (toupper(ghg) %in% names(data)) paste0("; did you mean \"", toupper(ghg), "\"?") else ".")
+  miss <- setdiff(c(reference_time, site, "analyzer"), names(reference_df))
+  if (length(miss)) stop("`reference_df` has no column(s): ", paste(miss, collapse = ", "), ".")
+  if (!inherits(reference_df[[reference_time]], "POSIXct"))
+    stop("`reference_df$", reference_time, "` must be date-times (POSIXct), e.g. from lubridate::ymd_hms().")
+  # plain text, not a regex: "1337+1098" must match itself
+  keep <- stringr::str_detect(as.character(reference_df$analyzer),
+                              stringr::fixed(analyzer_code, ignore_case = TRUE)) %in% TRUE
+  if (!any(keep)) warning("No `reference_df$analyzer` contains \"", analyzer_code, "\": no rows returned.",
+                          call. = FALSE)
+  list(ch4_opt = ch4_opt, need = need, reference_df = reference_df[keep, , drop = FALSE])
+}
+
+# fit_type = "auto" (kappamax) and window_type = "pareto" (fit_score sigma, bootstrap) need a
+# precision: instrument_precision, else the <ghg>_prec column tidy_ghg_analyzer() adds, in the
+# data's unit (as goFlux's prec argument and <gas>_prec columns; no guessing from analyzer names)
+.resolve_precision <- function(data, ghg, instrument_precision, fit_type, window_type) {
+  if ((fit_type == "auto" || window_type == "pareto") && is.null(instrument_precision)) {
+    p <- unique(stats::na.omit(data[[paste0(ghg, "_prec")]]))
+    if (length(p) != 1)
+      stop("fit_type = \"auto\" and window_type = \"pareto\" need instrument_precision, or one value in a `",
+           ghg, "_prec` column of `data` (added by tidy_ghg_analyzer() for LI-COR data).")
+    instrument_precision <- p
+  }
+  instrument_precision
+}
+
+# Readings of one closure (valid, inside the search window, in time order) with its slope unit,
+# first H2O reading (goFlux's flux term, goFlux.R H2O_flux.term) and a duplicate-timestamp warning.
+.closure_readings <- function(data, ghg, start_time, end_time, site_label) {
+  valid_rows    <- !is.na(data$real_datetime) & !is.na(data[[ghg]])
+  filtered_data <- data[valid_rows & data$real_datetime >= start_time &
+                          data$real_datetime <= end_time, ]
+  sorted_data   <- filtered_data[order(filtered_data$real_datetime), ]
+  # concentration unit from tidy_ghg_analyzer()'s <ghg>_unit column, if any
+  u <- unique(stats::na.omit(sorted_data[[paste0(ghg, "_unit")]]))
+  if (length(u) > 1) stop("Mixed ", ghg, "_unit values for ", site_label, ": ", paste(u, collapse = ", "))
+  h2o <- if ("H2O" %in% names(sorted_data)) stats::na.omit(as.numeric(sorted_data$H2O)) else numeric(0)
+  if (anyDuplicated(sorted_data$real_datetime))
+    warning("Duplicated timestamps for ", site_label, ": does `data` hold more than one ",
+            "analyzer? Pass one analyzer's readings per call.", call. = FALSE)
+  list(sorted = sorted_data,
+       slope_unit = if (length(u) == 1) paste0(u, " s-1") else NA_character_,
+       h2o_start = if (length(h2o)) h2o[1] else NA_real_)
+}
+
+# What a window method returns: the chosen fit and window of one closure. The defaults describe
+# "no fit" (r_square -Inf, which the QC flag reports as no_data); the pareto fields stay NA for
+# "fixed" and "sliding".
+.empty_window_fit <- function(fit_type) {
+  no_time <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
+  list(r_square = -Inf, slope = NA_real_, slope_lm = NA_real_, cor = NA_real_, b_param = NA_real_,
+       fit_used = fit_type, start_dt = no_time, end_dt = no_time, deadband = NA_real_,
+       cutoff = NA_real_, uncertainty_lo = NA_real_, uncertainty_hi = NA_real_,
+       n_candidates = NA_integer_, force_discard = FALSE, n_obs = 0L)
+}
+
+# Fit one stretch of readings and return the fields of .empty_window_fit() that describe it.
+.fit_selected <- function(selected, ghg, fit_type, t_zero, kappamax, instrument_precision) {
+  elapsed_s <- as.numeric(difftime(selected$real_datetime, selected$real_datetime[1], units = "secs"))
+  conc_vec  <- as.numeric(selected[[ghg]])
+  fit_out   <- .fit_ghg_model(conc_vec, elapsed_s, fit_type, t_zero, kappamax, instrument_precision)
+  list(r_square = fit_out$r_square, slope = fit_out$slope,
+       slope_lm = if (!is.null(fit_out$slope_lm)) fit_out$slope_lm else NA_real_,
+       b_param = fit_out$b_param, fit_used = fit_out$fit_used,
+       cor = if (!is.na(fit_out$r_square)) stats::cor(conc_vec, elapsed_s) else NA_real_,
+       start_dt = selected$real_datetime[1], end_dt = selected$real_datetime[nrow(selected)])
+}
+
+# One window of fixed start and length
+.fit_window_fixed <- function(sorted_data, ghg, win_start, win_end, need, fit_type, t_zero,
+                              kappamax, instrument_precision) {
+  fit <- .empty_window_fit(fit_type)
+  selected <- sorted_data[sorted_data$real_datetime >= win_start & sorted_data$real_datetime <= win_end, ]
+  fit$n_obs <- nrow(selected)
+  if (fit$n_obs >= need) {
+    cand <- .fit_selected(selected, ghg, fit_type, t_zero, kappamax, instrument_precision)
+    fit[names(cand)] <- cand
+  }
+  fit
+}
+
+# The `num_rows`-reading window with the highest R2
+.fit_window_sliding <- function(sorted_data, ghg, num_rows, fit_type, t_zero, kappamax,
+                                instrument_precision) {
+  best <- .empty_window_fit(fit_type)
+  if (nrow(sorted_data) < num_rows) return(best)
+  for (j in 1:(nrow(sorted_data) - num_rows + 1)) {
+    cand <- .fit_selected(sorted_data[j:(j + num_rows - 1), ], ghg, fit_type, t_zero, kappamax,
+                          instrument_precision)
+    if (!is.na(cand$r_square) && cand$r_square > best$r_square) best[names(cand)] <- cand
+  }
+  best
+}
+
+# The window picked by the Pareto search (.pareto_select_window)
+.fit_window_pareto <- function(sorted_data, ghg, reference_datetime, fit_type, t_zero, kappamax,
+                               instrument_precision, min_deadband, max_deadband, deadband_step,
+                               min_window_size, cutoff_step, n_boot, need) {
+  fit <- .empty_window_fit(fit_type)
+  .notify_pareto_experimental()
+  pw <- .pareto_select_window(sorted_data, ghg, reference_datetime,
+                              fit_type, t_zero, kappamax, instrument_precision,
+                              min_deadband, max_deadband, deadband_step,
+                              min_window_size, cutoff_step, n_boot, need)
+  fit$n_candidates <- pw$n_candidates
+  if (identical(pw$status, "no_candidates")) {
+    fit$force_discard <- TRUE
+  } else if (identical(pw$status, "selected")) {
+    sel <- pw$selected
+    fit[c("r_square", "slope", "slope_lm", "b_param", "fit_used", "cor", "start_dt", "end_dt",
+          "deadband", "cutoff", "uncertainty_lo", "uncertainty_hi")] <-
+      sel[c("r_square", "slope", "slope_lm", "b_param", "fit_used", "cor", "start_dt", "end_dt",
+            "deadband", "cutoff", "uncertainty_lo", "uncertainty_hi")]
+  }
+  # status == "no_grid" (too little data): the defaults stay, as "fixed"/"sliding" fall through
+  # to flag = "no_data"
+  fit
+}
+
+# Quality flag: the correlation threshold separates "zero" (no trend) from "discard" (poor fit).
+.qc_flag <- function(cor, r2, cor_threshold, r2_threshold) {
+  # cor is NA with a fit but constant readings: no trend, so "zero"
+  if (is.na(r2) || is.infinite(r2)) "no_data" else if (is.na(cor) || abs(cor) < cor_threshold) "zero" else
+    if (r2 >= r2_threshold) "ok" else "discard"
+}
+
+# TRUE when |slope| is below precision / duration (the minimum detectable slope); NA without a
+# precision, a slope or a positive duration
+.below_mdf <- function(slope, duration_s, instrument_precision) {
+  if (is.null(instrument_precision) || is.na(slope) || !isTRUE(duration_s > 0)) return(NA)
+  abs(slope) < instrument_precision / duration_s
+}
+
+# CH4 split of one closure's final window (.separate_ch4) merged with its regression result.
+# Returns the split, the regression's own QC (kept as *_regression) and the updated slope,
+# r_square, cor, flag, g_factor and below_mdf.
+.merge_ch4_split <- function(sorted_data, ghg, ch4_opt, reference_datetime, fit, flag, g_factor,
+                             below_mdf, instrument_precision, cor_threshold, r2_threshold) {
+  win <- if (is.na(fit$start_dt)) sorted_data[0, ] else
+    sorted_data[sorted_data$real_datetime >= fit$start_dt & sorted_data$real_datetime <= fit$end_dt, ]
+  split <- .separate_ch4(as.numeric(win$real_datetime), as.numeric(win[[ghg]]), ch4_opt,
+                         as.numeric(reference_datetime))
+  split$regression <- fit$slope
+  reg_qc <- list(r_square = fit$r_square, correlation = fit$cor, flag = flag, g_factor = g_factor)
+  slope <- fit$slope; r_square <- fit$r_square; cor <- fit$cor
+  if (startsWith(split$ch4_flag, "no bubble")) {
+    split$total <- split$diffusion <- slope  # keep the regression's own fit
+    split$diff_start <- as.numeric(fit$start_dt)
+    split$diff_end <- as.numeric(fit$end_dt)
+  } else if (!is.na(split$total)) {
+    slope <- split$total
+    g_factor <- NA_real_  # describes the regression curve, no longer the reported slope
+    # flag, r_square and correlation always describe the diffusion line; NA when there is
+    # none (total only), the regression's stay in *_regression
+    if (flag != "no_data") {
+      r_square <- split$diff_r2
+      cor <- split$diff_cor
+      flag <- if (is.na(split$diff_r2)) NA_character_ else .qc_flag(cor, r_square, cor_threshold, r2_threshold)
+    }
+    if (!is.null(instrument_precision)) below_mdf <- .below_mdf(slope, split$total_s, instrument_precision)
+  }
+  list(split = split, reg_qc = reg_qc, slope = slope, r_square = r_square, cor = cor, flag = flag,
+       g_factor = g_factor, below_mdf = below_mdf)
 }
 
 #' @title make_reference
@@ -1536,22 +1589,13 @@ plot_ghg_flux <- function(data, regression_result, ghg,
       seg <- win$real_datetime >= as_time(row$diffusion_start) & win$real_datetime <= as_time(row$diffusion_end)
       if (sum(seg) >= 2) {
         elapsed_seq <- seq(min(elapsed_s[seg]), max(elapsed_s[seg]), length.out = 200)
-        fit    <- stats::lm(y ~ x, data.frame(x = elapsed_s[seg], y = conc_vec[seg]))
-        fitted <- stats::predict(fit, newdata = data.frame(x = elapsed_seq))
+        fitted <- .model_curve("linear", conc_vec[seg], elapsed_s[seg], elapsed_seq)
       } else fitted <- rep(NA_real_, 200)
     } else if (has_total(row)) {
       fitted <- rep(NA_real_, 200)  # total only: no diffusion line
-    } else if (model == "quadratic") {
-      fit    <- stats::lm(conc_vec ~ elapsed_s + I(elapsed_s^2))
-      fitted <- stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq))
-    } else if (model %in% c("exp_tz", "exp_zhao18")) {
-      ef <- .exp_curve_fit(conc_vec, elapsed_s, zhao = model == "exp_zhao18")
-      u  <- elapsed_seq - if (is.null(ef)) 0 else ef$t0
-      fitted <- if (is.null(ef)) rep(NA_real_, 200) else
-        ef$Cm + ef$a * u + (ef$C0 - ef$Cm) * exp(-ef$b * u)
     } else {
-      fit    <- stats::lm(conc_vec ~ elapsed_s)
-      fitted <- stats::predict(fit, newdata = data.frame(elapsed_s = elapsed_seq))
+      fitted <- .model_curve(if (model %in% c("quadratic", "exp_tz", "exp_zhao18")) model else "linear",
+                             conc_vec, elapsed_s, elapsed_seq)
     }
     lns[[length(lns) + 1]] <- data.frame(panel = pid, elapsed_s = elapsed_seq, fitted = fitted,
                                          flag = flag, line = "fit / diffusion")
