@@ -226,7 +226,7 @@
 #'   With \code{bubble_detection = TRUE} also \code{slope_source} (\code{"total"} when
 #'   \code{slope} is \code{slope_total}, \code{"regression"} when it is \code{slope_regression}),
 #'   \code{slope_regression}, \code{r_square_regression},
-#'   \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression} (the
+#'   \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression}, \code{below_mdf_regression} (the
 #'   regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}}),
 #'   \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error, with the
 #'   effective sample size n(1 - r1)/(1 + r1) in the residual variance, because the OLS SE is biased
@@ -472,7 +472,8 @@ calculate_regression <- function(data, reference_df, ghg,
         slope_regression = split$regression,
         r_square_regression = if (no_fit) NA_real_ else reg_qc$r_square,
         correlation_regression = reg_qc$correlation, flag_regression = reg_qc$flag,
-        g_factor_regression = reg_qc$g_factor, slope_total = split$total,
+        g_factor_regression = reg_qc$g_factor, below_mdf_regression = reg_qc$below_mdf,
+        slope_total = split$total,
         slope_diffusion = split$diffusion, slope_diffusion_se = split$diff_se,
         diffusion_r1 = split$diff_r1,
         n_obs_diffusion = if (startsWith(split$ch4_flag, "no bubble")) fit$n_obs else split$diff_n,
@@ -664,7 +665,8 @@ calculate_regression <- function(data, reference_df, ghg,
   split <- .separate_ch4(as.numeric(win$real_datetime), as.numeric(win[[ghg]]), ch4_opt,
                          as.numeric(reference_datetime))
   split$regression <- fit$slope
-  reg_qc <- list(r_square = fit$r_square, correlation = fit$cor, flag = flag, g_factor = g_factor)
+  reg_qc <- list(r_square = fit$r_square, correlation = fit$cor, flag = flag, g_factor = g_factor,
+                 below_mdf = below_mdf)
   slope <- fit$slope; r_square <- fit$r_square; cor <- fit$cor
   if (startsWith(split$ch4_flag, "no bubble")) {
     split$total <- split$diffusion <- slope  # keep the regression's own fit
@@ -695,9 +697,11 @@ calculate_regression <- function(data, reference_df, ghg,
 #'   \describe{
 #'     \item{\code{"accept"}}{Keep the split as it is.}
 #'     \item{\code{"total"}}{Total only: \code{slope} is \code{slope_total}; diffusion and
-#'       ebullition are \code{NA}.}
+#'       ebullition are \code{NA}, and so are \code{r_square}, \code{correlation} and
+#'       \code{flag} (they described the diffusion line), as for an automatic total-only closure.}
 #'     \item{\code{"not_bubble"}}{Use the regression fit as for a closure without a bubble:
-#'       \code{slope}, \code{r_square}, \code{correlation}, \code{flag} and \code{g_factor} come
+#'       \code{slope}, \code{r_square}, \code{correlation}, \code{flag}, \code{g_factor} and
+#'       \code{below_mdf} come
 #'       from the \code{*_regression} columns, total = diffusion = \code{slope_regression},
 #'       ebullition = 0, and the diffusion segment is the whole window.}
 #'     \item{\code{"discard"}}{\code{flag} is \code{"discard"}; values are kept.}
@@ -743,10 +747,11 @@ apply_ch4_review <- function(regression_result, decisions, by = c("site", "refer
 
   tot <- d %in% "total"
   reg$slope[tot] <- reg$slope_total[tot]
+  for (x in c("r_square", "correlation", "flag")) reg[[x]][tot] <- NA
   reg[tot, intersect(c("slope_diffusion", "slope_diffusion_se", "diffusion_r1",
                        "slope_ebullition"), names(reg))] <- NA_real_
   nb <- d %in% "not_bubble"
-  for (x in c("r_square", "correlation", "flag", "g_factor")) reg[[x]][nb] <- reg[[paste0(x, "_regression")]][nb]
+  for (x in c("r_square", "correlation", "flag", "g_factor", "below_mdf")) reg[[x]][nb] <- reg[[paste0(x, "_regression")]][nb]
   reg$slope[nb] <- reg$slope_total[nb] <- reg$slope_diffusion[nb] <- reg$slope_regression[nb]
   reg$slope_ebullition[nb] <- 0
   reg$slope_diffusion_se[nb] <- NA_real_
@@ -758,4 +763,31 @@ apply_ch4_review <- function(regression_result, decisions, by = c("site", "refer
   reg$flag[d %in% "discard"] <- "discard"
   reg$ch4_decision <- ifelse(!is.na(d), d, ifelse(reg$review_needed, "unreviewed", "auto"))
   reg
+}
+
+#' @title ch4_review_template
+#' @description Table of the closures that need a decision, for \code{\link{apply_ch4_review}}.
+#' @param regression_result Output of \code{calculate_regression(bubble_detection = TRUE)}.
+#' @param by Columns identifying a closure. Default \code{c("site", "reference_time")}.
+#' @return The rows with \code{review_needed = TRUE}: the \code{by} columns, \code{ch4_flag} and an
+#'   empty (\code{NA}) \code{decision} column to fill in with \code{"accept"}, \code{"total"},
+#'   \code{"not_bubble"} or \code{"discard"}.
+#' @examples
+#' t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+#' set.seed(1)
+#' ch4 <- data.frame(real_datetime = t0 + 0:299,
+#'                   CH4 = 2 + 1e-4 * (0:299) + rnorm(300, 0, 2e-4) + 0.05 * (0:299 >= 150))
+#' reg <- calculate_regression(ch4, data.frame(date_time = t0, site = "P1", analyzer = "a"), "CH4",
+#'                             reference_time = "date_time", site = "site", analyzer_code = "a",
+#'                             duration_minutes = 299 / 60, bubble_detection = TRUE)
+#' ch4_review_template(reg)
+#' @export
+ch4_review_template <- function(regression_result, by = c("site", "reference_time")) {
+  reg <- regression_result
+  if (!"review_needed" %in% names(reg))
+    stop("regression_result needs the columns of calculate_regression(bubble_detection = TRUE).")
+  if (length(setdiff(by, names(reg)))) stop("regression_result is missing: ", paste(setdiff(by, names(reg)), collapse = ", "))
+  out <- reg[reg$review_needed %in% TRUE, c(by, "ch4_flag")]
+  out$decision <- NA_character_
+  out
 }

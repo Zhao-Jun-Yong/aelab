@@ -606,6 +606,24 @@ test_that("apply_ch4_review applies decisions", {
   expect_equal(out$ch4_decision, c("not_bubble", "total"))
   expect_equal(out$slope_source, c("regression", "total"))
   expect_equal(apply_ch4_review(reg, dec[0, ])$slope_source, reg$slope_source)
+  # total: the diffusion line's QC is dropped (NA, as for an automatic total-only closure)
+  expect_true(is.na(out$flag[2]) && is.na(out$r_square[2]) && is.na(out$correlation[2]))
+  expect_false(is.na(out$flag_regression[2]))
+  # not_bubble: below_mdf comes back from the regression fit
+  reg_p <- calculate_regression(d, ref, "CH4", "date_time", "site", "a", duration_minutes = 299 / 60,
+                                bubble_detection = TRUE, instrument_precision = 0.6)
+  expect_true("below_mdf_regression" %in% names(reg_p))
+  reg_p$below_mdf <- FALSE; reg_p$below_mdf_regression <- TRUE
+  out_p <- apply_ch4_review(reg_p, dec)
+  expect_equal(out_p$below_mdf, c(TRUE, FALSE))
+
+  tmpl <- ch4_review_template(reg)
+  expect_equal(nrow(tmpl), sum(reg$review_needed))
+  expect_true(all(is.na(tmpl$decision)))
+  expect_equal(names(tmpl), c("site", "reference_time", "ch4_flag", "decision"))
+  tmpl$decision <- "not_bubble"
+  expect_equal(apply_ch4_review(reg, tmpl)$ch4_decision[reg$review_needed], rep("not_bubble", nrow(tmpl)))
+  expect_error(ch4_review_template(plain), "bubble_detection")
 
   expect_equal(apply_ch4_review(reg, dec[0, ])$ch4_decision, ifelse(reg$review_needed, "unreviewed", "auto"))
   expect_equal(apply_ch4_review(reg, transform(dec, decision = "discard"))$flag, c("discard", "discard"))

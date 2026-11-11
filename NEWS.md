@@ -15,6 +15,11 @@
 
 * New column `slope_source` with `bubble_detection = TRUE`: `"total"` when `slope` is `slope_total`,
   `"regression"` when it is `slope_regression`; `apply_ch4_review()` keeps it in step.
+* `ch4_review_template()`: the `review_needed` closures with an empty `decision` column, for
+  `apply_ch4_review()`.
+* `apply_ch4_review()`: decision `"total"` sets `r_square`, `correlation` and `flag` to `NA` (they
+  described the diffusion line; as for an automatic total-only closure). Decision `"not_bubble"` also
+  restores `below_mdf` from the regression fit, kept in the new column `below_mdf_regression`.
 
 ## `convert_ghg_unit()`
 

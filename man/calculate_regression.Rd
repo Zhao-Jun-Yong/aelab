@@ -280,7 +280,7 @@ A tibble with columns: \code{start_time}, \code{end_time} (date-times in Asia/Ta
   With \code{bubble_detection = TRUE} also \code{slope_source} (\code{"total"} when
   \code{slope} is \code{slope_total}, \code{"regression"} when it is \code{slope_regression}),
   \code{slope_regression}, \code{r_square_regression},
-  \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression} (the
+  \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression}, \code{below_mdf_regression} (the
   regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}}),
   \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error, with the
   effective sample size n(1 - r1)/(1 + r1) in the residual variance, because the OLS SE is biased
