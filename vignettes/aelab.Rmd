@@ -317,7 +317,7 @@ calculate_MDF(
 `calculate_total_co2e()` aggregates individual GHG fluxes (mg m⁻² h⁻¹) into a single total CO₂-equivalent flux (g m⁻² d⁻¹) using IPCC AR6 100-year Global Warming Potentials (GWPs; CH₄ = 27, N₂O = 273).
 
 ```{r}
-calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003)
+calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003, verbose = TRUE)
 ```
 
 # NEM calculation

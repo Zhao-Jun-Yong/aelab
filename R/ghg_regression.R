@@ -216,14 +216,14 @@
 #'   \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),
 #'   \code{below_mdf} (\code{TRUE} when the slope is below the minimum detectable slope;
 #'   \code{NA} without \code{instrument_precision}),
-#'   \code{reference_time}, \code{site}, \code{analyzer}. When \code{window_type = "pareto"}, five
-#'   additional columns are included: \code{deadband}/\code{cutoff} (the selected candidate window,
-#'   seconds from the reference time; \code{NA} for other window types), \code{slope_uncertainty_lo}/
+#'   \code{reference_time}, \code{site}, \code{analyzer}. Five more columns are always
+#'   present and \code{NA} unless \code{window_type = "pareto"}: \code{deadband}/\code{cutoff} (the
+#'   selected candidate window, seconds from the reference time), \code{slope_uncertainty_lo}/
 #'   \code{slope_uncertainty_hi} (16th/84th percentile of the residual-bootstrap slope distribution
 #'   for the selected window), and \code{n_candidates} (number of deadband/cutoff candidates that
 #'   produced a usable fit; \code{0} when the measurement was flagged \code{"discard"} because no
 #'   candidate survived).
-#'   With \code{bubble_detection = TRUE} also \code{slope_source} (\code{"total"} when
+#'   Only with \code{bubble_detection = TRUE} are there also \code{slope_source} (\code{"total"} when
 #'   \code{slope} is \code{slope_total}, \code{"regression"} when it is \code{slope_regression}),
 #'   \code{slope_regression}, \code{r_square_regression},
 #'   \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression}, \code{below_mdf_regression} (the

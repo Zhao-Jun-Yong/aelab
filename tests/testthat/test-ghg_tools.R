@@ -14,11 +14,12 @@ test_that("calculate_MDF follows the formula and scales with molar mass", {
 })
 
 test_that("calculate_total_co2e uses GWP 1, 27, 273 and converts mg h-1 to g d-1", {
-  expect_message(res <- calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003),
-                 "Total CO2e")
+  expect_no_message(res <- calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003))
   expect_equal(res, (4.02 + 0.001 * 27 + 0.003 * 273) * 0.001 * 24)
-  expect_equal(suppressMessages(calculate_total_co2e(ch4 = 1)), 27 * 0.024)
-  expect_equal(suppressMessages(calculate_total_co2e()), 0)
+  expect_equal(calculate_total_co2e(ch4 = 1), 27 * 0.024)
+  expect_equal(calculate_total_co2e(), 0)
+  expect_message(calculate_total_co2e(ch4 = 1, verbose = TRUE), "GWP: 27")
+  expect_message(calculate_total_co2e(n2o = 1, verbose = TRUE), "GWP: 273")
 })
 
 test_that("make_reference parses positional and keyword window overrides", {

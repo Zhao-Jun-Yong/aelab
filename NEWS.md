@@ -25,6 +25,10 @@
   `readxl` are gone. The output is unchanged.
 * The duplicate-timestamp warning of `calculate_regression()` gives the number of repeated readings
   and the number of readings; all of them are still used.
+* `calculate_total_co2e()` no longer prints messages by default; `verbose = TRUE` prints the fluxes,
+  the GWPs used and the total.
+* Help of `calculate_regression()`: the five pareto columns are always present (`NA` unless
+  `window_type = "pareto"`).
 
 ## `convert_ghg_unit()`
 

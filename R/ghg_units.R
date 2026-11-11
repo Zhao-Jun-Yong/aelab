@@ -219,20 +219,25 @@ calculate_MDF <- function(precision_ppm, closure_time_s, data_point_n,
 #' @param co2 CO\eqn{_2} flux in mg m\eqn{^{-2}} h\eqn{^{-1}}. Default 0.
 #' @param ch4 CH\eqn{_4} flux in mg m\eqn{^{-2}} h\eqn{^{-1}}. Default 0.
 #' @param n2o N\eqn{_2}O flux in mg m\eqn{^{-2}} h\eqn{^{-1}}. Default 0.
+#' @param verbose If \code{TRUE}, print the fluxes, the GWPs used and the total as messages.
+#'   Default \code{FALSE}.
 #' @return Total CO\eqn{_2}e flux as a numeric scalar
-#'   (g m\eqn{^{-2}} d\eqn{^{-1}}), printed with a diagnostic message.
+#'   (g m\eqn{^{-2}} d\eqn{^{-1}}).
 #' @examples
 #' calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003)
+#' calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003, verbose = TRUE)
 #' @export
-calculate_total_co2e <- function(co2 = 0, ch4 = 0, n2o = 0) {
+calculate_total_co2e <- function(co2 = 0, ch4 = 0, n2o = 0, verbose = FALSE) {
   co2e_mg_hr <- co2 + (ch4 * 27) + (n2o * 273)
   co2e_g_day <- co2e_mg_hr * 0.001 * 24
 
-  message("Calculating total CO2e emissions:")
-  message(sprintf("CO2 emissions: %.2f mg m^-2 h^-1", co2))
-  message(sprintf("CH4 emissions: %.2f mg m^-2 h^-1 (GWP: 27)", ch4))
-  message(sprintf("N2O emissions: %.2f mg m^-2 h^-1 (GWP: 273)", n2o))
-  message(sprintf("Total CO2e emissions: %.2f g m^-2 d^-1", co2e_g_day))
+  if (verbose) {
+    message("Calculating total CO2e emissions:")
+    message(sprintf("CO2 emissions: %.2f mg m^-2 h^-1 (GWP: 1)", co2))
+    message(sprintf("CH4 emissions: %.2f mg m^-2 h^-1 (GWP: 27)", ch4))
+    message(sprintf("N2O emissions: %.2f mg m^-2 h^-1 (GWP: 273)", n2o))
+    message(sprintf("Total CO2e emissions: %.2f g m^-2 d^-1", co2e_g_day))
+  }
 
   return(co2e_g_day)
 }

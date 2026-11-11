@@ -4,7 +4,7 @@
 \alias{calculate_total_co2e}
 \title{calculate_total_co2e}
 \usage{
-calculate_total_co2e(co2 = 0, ch4 = 0, n2o = 0)
+calculate_total_co2e(co2 = 0, ch4 = 0, n2o = 0, verbose = FALSE)
 }
 \arguments{
 \item{co2}{CO\eqn{_2} flux in mg m\eqn{^{-2}} h\eqn{^{-1}}. Default 0.}
@@ -12,10 +12,13 @@ calculate_total_co2e(co2 = 0, ch4 = 0, n2o = 0)
 \item{ch4}{CH\eqn{_4} flux in mg m\eqn{^{-2}} h\eqn{^{-1}}. Default 0.}
 
 \item{n2o}{N\eqn{_2}O flux in mg m\eqn{^{-2}} h\eqn{^{-1}}. Default 0.}
+
+\item{verbose}{If \code{TRUE}, print the fluxes, the GWPs used and the total as messages.
+Default \code{FALSE}.}
 }
 \value{
 Total CO\eqn{_2}e flux as a numeric scalar
-  (g m\eqn{^{-2}} d\eqn{^{-1}}), printed with a diagnostic message.
+  (g m\eqn{^{-2}} d\eqn{^{-1}}).
 }
 \description{
 Convert individual GHG fluxes (mg m\eqn{^{-2}} h\eqn{^{-1}})
@@ -25,4 +28,5 @@ Convert individual GHG fluxes (mg m\eqn{^{-2}} h\eqn{^{-1}})
 }
 \examples{
 calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003)
+calculate_total_co2e(co2 = 4.02, ch4 = 0.001, n2o = 0.003, verbose = TRUE)
 }
