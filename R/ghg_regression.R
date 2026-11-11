@@ -769,8 +769,8 @@ calculate_regression <- function(data, reference_df, ghg,
 #'     \item{\code{"accept"}}{Keep the split as it is.}
 #'     \item{\code{"total"}}{Total only: \code{slope} is \code{slope_total}; diffusion and
 #'       ebullition are \code{NA}, and so are \code{r_square}, \code{rmse}, \code{slope_se}, \code{correlation},
-#'       \code{flag} and \code{n_obs_diffusion} (they described the diffusion line), as for an
-#'       automatic total-only closure.}
+#'       \code{flag}, \code{n_obs_diffusion}, \code{diffusion_start} and \code{diffusion_end}
+#'       (they described the diffusion line), as for an automatic total-only closure.}
 #'     \item{\code{"not_bubble"}}{Use the regression fit as for a closure without a bubble:
 #'       \code{slope}, \code{slope_se}, \code{r_square}, \code{rmse}, \code{correlation}, \code{flag}, \code{g_factor} and
 #'       \code{below_mdf} come
@@ -823,6 +823,7 @@ apply_ch4_review <- function(regression_result, decisions, by = c("site", "refer
   for (x in intersect(c("r_square", "rmse", "slope_se", "correlation", "flag"), names(reg))) reg[[x]][tot] <- NA
   reg[tot, intersect(c("slope_diffusion", "slope_diffusion_se", "diffusion_r1",
                        "slope_ebullition"), names(reg))] <- NA_real_
+  reg$diffusion_start[tot] <- reg$diffusion_end[tot] <- NA  # no diffusion line left to draw
   nb <- d %in% "not_bubble"
   for (x in c("r_square", "rmse", "slope_se", "correlation", "flag", "g_factor", "below_mdf")) {
     if (paste0(x, "_regression") %in% names(reg)) reg[[x]][nb] <- reg[[paste0(x, "_regression")]][nb]

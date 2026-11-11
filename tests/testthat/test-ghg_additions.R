@@ -117,7 +117,12 @@ test_that("apply_ch4_review() keeps n_obs_diffusion in step with the decision", 
   expect_lt(reg$n_obs_diffusion, reg$n_obs)
   expect_equal(apply_ch4_review(reg, dec)$n_obs_diffusion, reg$n_obs)
   dec$decision <- "total"
-  expect_true(is.na(apply_ch4_review(reg, dec)$n_obs_diffusion))
+  tot <- apply_ch4_review(reg, dec)
+  expect_true(is.na(tot$n_obs_diffusion))
+  expect_true(is.na(tot$diffusion_start) && is.na(tot$diffusion_end))
+  expect_false(is.na(reg$diffusion_start))
+  # the plot still draws it: the total line, no diffusion line
+  expect_s3_class(plot_ghg_flux(data.frame(real_datetime = t0 + 0:299, CH4 = y), tot, "CH4"), "ggplot")
 })
 
 test_that("slope_se is the Santer-corrected standard error of a linear slope", {

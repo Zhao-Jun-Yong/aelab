@@ -13,7 +13,8 @@
   `data_ratio` (`n_obs` per second of the window, fluxible's data ratio) and `start_conc` (mean of the
   first three readings of the closure, the readings fluxible's `start_error` check uses). None of them
   sets a flag. `apply_ch4_review()` keeps `rmse` in step with `r_square`, and `n_obs_diffusion` with the
-  decision (`n_obs` for `"not_bubble"`, `NA` for `"total"`; it kept the old diffusion segment's count).
+  decision (`n_obs` for `"not_bubble"`; for `"total"` it is `NA`, and so are `diffusion_start` and
+  `diffusion_end`, as for an automatic total-only closure, so the plot draws no diffusion line).
 * New column `slope_se` (and `slope_se_regression` with `bubble_detection = TRUE`): the standard error of
   `slope` for linear fits, with the same Santer et al. (2000) effective-sample-size correction as
   `slope_diffusion_se` (now one shared function; its values are unchanged). `NA` for the other models and

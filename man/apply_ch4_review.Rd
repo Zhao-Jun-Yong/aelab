@@ -18,8 +18,8 @@ apply_ch4_review(
   \item{\code{"accept"}}{Keep the split as it is.}
   \item{\code{"total"}}{Total only: \code{slope} is \code{slope_total}; diffusion and
     ebullition are \code{NA}, and so are \code{r_square}, \code{rmse}, \code{slope_se}, \code{correlation},
-    \code{flag} and \code{n_obs_diffusion} (they described the diffusion line), as for an
-    automatic total-only closure.}
+    \code{flag}, \code{n_obs_diffusion}, \code{diffusion_start} and \code{diffusion_end}
+    (they described the diffusion line), as for an automatic total-only closure.}
   \item{\code{"not_bubble"}}{Use the regression fit as for a closure without a bubble:
     \code{slope}, \code{slope_se}, \code{r_square}, \code{rmse}, \code{correlation}, \code{flag}, \code{g_factor} and
     \code{below_mdf} come
