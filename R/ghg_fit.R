@@ -74,8 +74,9 @@
 .rmse <- function(res) if (length(res) && !anyNA(res)) sqrt(mean(res^2)) else NA_real_
 
 # Standard error of a linear-fit slope with the effective sample size n_e = n (1 - r1) / (1 + r1) in
-# the residual variance, because the OLS SE is biased for autocorrelated 1 Hz residuals (Kutzbach et
-# al. 2007, p. 1011; Santer et al. 2000, Eq. 6, p. 7343; AdjSE, p. 7344). `se_ols` is the OLS SE of
+# the residual variance (Santer et al. 2000, Eq. 6, p. 7343; AdjSE, p. 7344), because the OLS SE is
+# biased for autocorrelated residuals (Kutzbach et al. 2007, p. 1011; they remove the autocorrelation
+# by block-averaging instead). `se_ols` is the OLS SE of
 # the slope, `e` the residuals. r1 is the lag-1 autocorrelation of `e`; the SE is NA when n_e <= 2.
 .santer_slope_se <- function(se_ols, e) {
   n  <- length(e)

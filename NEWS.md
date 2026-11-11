@@ -4,8 +4,9 @@
 
 * `tidy_ghg_analyzer()` reads a LI-COR `.data` text file directly (`analyzer = "licor"`, chosen by the
   `.data` extension) and returns the same table as the Excel export: on the four files of one
-  campaign (LI-7810 and LI-7820) the columns, values and row counts are identical. Units come from the
-  file's `DATAU` line.
+  campaign (LI-7810 and LI-7820) the columns and row counts are identical and the values agree to within
+  1e-12 (Excel's stored precision). Units come from the file's `DATAU` line. A `DATA` line with fewer or
+  more fields than the header is dropped, with a warning giving the count.
 * `calculate_regression()` gains three columns: `rmse` (root mean square of the residuals of the fit in
   `fit_used`, dividing by the number of readings as fluxible and goFlux; for closures with a CH4 bubble
   it describes the diffusion fit like `r_square`, and `rmse_regression` keeps the regression's),
@@ -27,13 +28,14 @@
   `exp_tz` as 3 fitted parameters; since `C0` is fitted it has 4 (`Cm`, `a`, `C0`, `b`). With the right
   count `"auto"` needs a larger AICc gain to accept `exp_tz`, so a closure where it barely improved on the
   linear fit now stays linear (1 of 6 synthetic test closures; the CarbonIMTA-based fixtures are unchanged).
-  Explicit `fit_type = "exp_tz"` is not affected.
+  Explicit `fit_type = "exp_tz"` gives the same fits; with `window_type = "pareto"` its bootstrap
+  uncertainty bounds shift slightly, which can change the selected window.
 
 ## `exp_hm`
 
 * New `fit_type = "exp_hm"`: the Hutchinson-Mosier curve `Cm + (C0 - Cm) exp(-b t)` with slope
   `b (Cm - C0) exp(-b t0)` (fluxible's `exp_hm`, Gaudard et al. 2025; goFlux's HM fit has the same
-  form), fitted to all readings by least squares. `C0` and `Cm` are fitted. It is selected by name only; `"auto"` and `"pareto"` do not use it.
+  form), fitted to all readings by least squares. `C0` and `Cm` are fitted. It is selected by name only; `"auto"` does not use it (`window_type = "pareto"` works with it).
   Without curvature it gives an `NA` slope, as `exp_tz`.
 
 # aelab 1.2.0

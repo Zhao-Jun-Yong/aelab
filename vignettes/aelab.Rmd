@@ -99,7 +99,8 @@ The `fit_type` parameter controls the regression model:
 
 - **`"linear"`** (default): ordinary least-squares slope. Valid when concentration change is small relative to ambient.
 - **`"quadratic"`**: second-order polynomial; the reported slope is the initial rate at t = 0 (the coefficient of *t*).
-- **`"exp_tz"`** / **`"exp_zhao18"`**: exponential models with a linear term (Zhao et al. 2018); slope evaluated at `t_zero`.
+- **`"exp_tz"`** / **`"exp_zhao18"`**: exponential models with a linear term (Zhao et al. 2018); the `exp_tz` slope is evaluated at `t_zero`, the `exp_zhao18` slope at its fitted t0.
+- **`"exp_hm"`**: the Hutchinson-Mosier exponential without the linear term, for comparison; its slope is evaluated at `t_zero`, and `"auto"` never chooses it.
 - **`"auto"`**: tries linear → quadratic → exp_tz in sequence, accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a quadratic only when it levels off rather than accelerates (Levy et al. 2011), and an exponential only when its curvature parameter *b* does not exceed κ~max~ (Hüppi et al. 2018). The model chosen for each measurement is recorded in the `fit_used` output column.
 
 When `fit_type = "auto"`, analyser precision comes from `instrument_precision` (see Quality flags below) or, if that is not supplied, from the `CH4_prec`/`CO2_prec`/`N2O_prec` column that `tidy_ghg_analyzer()` adds to LI-COR data (values from the built-in `analyzer_precision` dataset). Other data need `instrument_precision`.

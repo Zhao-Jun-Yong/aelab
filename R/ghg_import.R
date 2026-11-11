@@ -14,6 +14,12 @@ utils::globalVariables(c("CO2", "CH4", "N2O", "conc", "analyzer_precision"))
   if (!all(keep %in% nm))
     stop("Header of ", basename(file_path), " has no ", paste(setdiff(keep, nm), collapse = ", "), " column.")
   rows <- lines[startsWith(lines, "DATA\t")]
+  # a line cut short (or with an extra tab in REMARK) has another number of fields than the header
+  full <- lengths(regmatches(rows, gregexpr("\t", rows, fixed = TRUE))) == length(nm) - 1L
+  if (any(!full))
+    warning(sum(!full), " DATA line(s) of ", basename(file_path), " do not have the ", length(nm),
+            " fields of the header and are dropped.", call. = FALSE)
+  rows <- rows[full]
   if (!length(rows)) stop(basename(file_path), " has no DATA lines.")
   d <- utils::read.delim(text = rows, header = FALSE, quote = "", col.names = nm,
                          colClasses = "character", fill = TRUE)

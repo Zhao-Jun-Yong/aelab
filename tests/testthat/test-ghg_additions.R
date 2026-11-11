@@ -61,7 +61,7 @@ test_that("exp_hm works through calculate_regression() and plot_ghg_flux()", {
   r <- calculate_regression(dat, ref1, "CO2", reference_time = "date_time", site = "site",
                             analyzer_code = "a", fit_type = "exp_hm", duration_minutes = 5)
   expect_identical(r$fit_used, "exp_hm")
-  expect_gt(r$slope, 0)
+  expect_equal(r$slope, 1, tolerance = 1e-3)  # b (Cm - C0) = 0.01 * 100 at t_zero = 0
   expect_s3_class(plot_ghg_flux(dat, r, "CO2"), "ggplot")
 })
 
@@ -98,6 +98,11 @@ test_that("tidy_ghg_analyzer() reads a LI-COR .data file", {
   expect_identical(d$CH4_unit[1], "ppb")
   expect_identical(d$CO2_unit[1], "ppm")
   expect_error(tidy_ghg_analyzer(f, "n2o"), "no N2O column")
+  # a line cut short, or with an extra field, is dropped with a warning, not read as a reading
+  writeLines(c(readLines(f)[1:9], "DATA\t4\t2026-11-07\t12:22:43\t14002.5\t412.2",
+               "DATA\t5\t2026-11-07\t12:22:44\t14003.5\t413.25\t2003.5\t45.1\textra"), f)
+  expect_warning(d2 <- tidy_ghg_analyzer(f, "ch4"), "2 DATA line")
+  expect_equal(d2$CH4, 2000.5)  # only the complete reading is left
   writeLines(c("Model:\tLI-7810", "DATAH\tDATE\tTIME\tH2O\tCO2\tCH4", "DATAU\tdate\ttime\tppm\tppm\tppb"), f)
   expect_error(tidy_ghg_analyzer(f, "ch4"), "no DATA lines")
 })
@@ -153,4 +158,11 @@ test_that("slope_se follows the slope in CH4 bubble closures and their review", 
                     decision = "not_bubble")
   rev <- apply_ch4_review(reg, dec)
   expect_equal(rev$slope_se[2], reg$slope_se_regression[2])
+  expect_equal(rev$rmse[2], reg$rmse_regression[2])
+  expect_equal(rev$r_square[2], reg$r_square_regression[2])
+  # "total" drops the regression fit, so its SE and RMSE go too (the clean closure had both)
+  dec_t <- data.frame(site = "clean", reference_time = format(t0, "%Y-%m-%d %H:%M:%S"), decision = "total")
+  tot <- apply_ch4_review(reg, dec_t)
+  expect_false(is.na(reg$slope_se[1]) || is.na(reg$rmse[1]))
+  expect_true(is.na(tot$slope_se[1]) && is.na(tot$rmse[1]))
 })
