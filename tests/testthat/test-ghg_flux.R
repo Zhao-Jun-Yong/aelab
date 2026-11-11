@@ -5,6 +5,21 @@ test_that("tidy_ghg_analyzer works correctly", {
   expect_identical(column_names, names(data))
   expect_equal(unique(data$CH4_unit), "ppb")
   expect_equal(unique(data$CO2_unit), "ppm")
+  expect_no_message(tidy_ghg_analyzer(test_file("ch4.xlsx"), gas = "ch4"))
+})
+
+test_that("tidy_ghg_analyzer picks LI-COR columns by header", {
+  raw <- openxlsx::read.xlsx(test_file("ch4.xlsx"), colNames = FALSE, skipEmptyRows = FALSE, skipEmptyCols = FALSE)
+  shifted <- tempfile(fileext = ".xlsx")
+  openxlsx::write.xlsx(cbind(extra = NA, raw), shifted, colNames = FALSE)
+  expect_equal(tidy_ghg_analyzer(shifted, "ch4"), tidy_ghg_analyzer(test_file("ch4.xlsx"), "ch4"))
+  expect_error(tidy_ghg_analyzer(test_file("ch4.xlsx"), "n2o"), "no N2O column")
+  # N2O layout (DATE, TIME, H2O, N2O): the CH4 fixture with CO2 and CH4 headers renamed
+  n2o <- raw; n2o[6, n2o[6, ] %in% "CH4"] <- "N2O"; n2o[6, n2o[6, ] %in% "CO2"] <- "X"  # sheet row 6 is the header
+  f <- tempfile(fileext = ".xlsx"); openxlsx::write.xlsx(n2o, f, colNames = FALSE)
+  out <- tidy_ghg_analyzer(f, "n2o")
+  expect_equal(out$N2O, tidy_ghg_analyzer(test_file("ch4.xlsx"), "ch4")$CH4[!is.na(out$N2O)][seq_along(out$N2O)])
+  expect_true(all(c("DATE", "TIME", "H2O", "N2O", "N2O_unit", "N2O_prec") %in% names(out)))
 })
 
 test_that("slope_unit flows from tidy_ghg_analyzer() to calculate_ghg_flux()", {
@@ -580,7 +595,7 @@ test_quiet("bubble_detection guards, new columns, plot and option checks", {
   expect_error(calculate_regression(d, ref, "CH4", "date_time", "site", "a", ch4_options = list(1)),
                "name")
   expect_warning(calculate_regression(rbind(d, d), ref, "CH4", "date_time", "site", "a"),
-                 "Duplicated timestamps")
+                 "300 of 600 readings .* repeat an earlier timestamp")
 })
 
 test_that("apply_ch4_review applies decisions", {

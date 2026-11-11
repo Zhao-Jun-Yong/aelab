@@ -35,15 +35,19 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
          "or lgr with \"ch4\".")
 
   # Import data from the specified Excel file
-  data <- readxl::read_excel(file_path)
+  data <- readxl::read_excel(file_path, .name_repair = "minimal")
 
   # Tidy data based on the type of analyzer
   if(analyzer == "licor") {
+    # the header is row 5; columns are picked by their title
+    keep <- c("DATE", "TIME", "H2O", if (gas == "ch4") c("CO2", "CH4") else "N2O")
+    header <- as.character(unlist(data[5, ]))
+    if (!all(keep %in% header))
+      stop("Header row 5 of the file has no ", paste(setdiff(keep, header), collapse = ", "), " column.")
+    cols <- match(keep, header)
     if (gas == "ch4") {
-      # Extract column titles for CH4 data
-      title <- data[5, 7:11]
-      # Remove unnecessary rows and keep relevant columns (DATE, TIME, H2O, CO2, CH4)
-      data <- data[-c(1:6), 7:11]
+      title <- data[5, cols]
+      data <- data[-c(1:6), cols]
       colnames(data) <- title  # Set new column names
       data <- as.data.frame(data)  # Convert to data frame
       data$CH4 <- as.numeric(data$CH4)  # Convert CH4 to numeric
@@ -52,10 +56,8 @@ tidy_ghg_analyzer <- function(file_path, gas, analyzer = "licor",
       # Filter out rows with NaN values in CH4 and CO2
       data <- dplyr::filter(data, !is.na(CH4), !is.na(CO2))
     } else if (gas == "n2o") {
-      # Extract column titles for N2O data
-      title <- data[5, 7:10]
-      # Remove unnecessary rows and keep relevant columns (DATE, TIME, H2O, N2O)
-      data <- data[-c(1:6), 7:10]
+      title <- data[5, cols]
+      data <- data[-c(1:6), cols]
       colnames(data) <- title  # Set new column names
       data <- as.data.frame(data)  # Convert to data frame
       data$N2O <- as.numeric(data$N2O)  # Convert N2O to numeric

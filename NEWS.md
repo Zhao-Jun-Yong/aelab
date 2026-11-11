@@ -20,6 +20,11 @@
 * `apply_ch4_review()`: decision `"total"` sets `r_square`, `correlation` and `flag` to `NA` (they
   described the diffusion line; as for an automatic total-only closure). Decision `"not_bubble"` also
   restores `below_mdf` from the regression fit, kept in the new column `below_mdf_regression`.
+* `tidy_ghg_analyzer()`: LI-COR columns are picked by their header (row 5: `DATE`, `TIME`, `H2O`,
+  `CO2`, `CH4` or `N2O`), with an error naming a missing one; the "New names" messages from
+  `readxl` are gone. The output is unchanged.
+* The duplicate-timestamp warning of `calculate_regression()` gives the number of repeated readings
+  and the number of readings; all of them are still used.
 
 ## `convert_ghg_unit()`
 

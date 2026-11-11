@@ -559,9 +559,11 @@ calculate_regression <- function(data, reference_df, ghg,
   u <- unique(stats::na.omit(sorted_data[[paste0(ghg, "_unit")]]))
   if (length(u) > 1) stop("Mixed ", ghg, "_unit values for ", site_label, ": ", paste(u, collapse = ", "))
   h2o <- if ("H2O" %in% names(sorted_data)) stats::na.omit(as.numeric(sorted_data$H2O)) else numeric(0)
-  if (anyDuplicated(sorted_data$real_datetime))
-    warning("Duplicated timestamps for ", site_label, ": does `data` hold more than one ",
-            "analyzer? Pass one analyzer's readings per call.", call. = FALSE)
+  n_dup <- sum(duplicated(sorted_data$real_datetime))
+  if (n_dup)
+    warning(n_dup, " of ", nrow(sorted_data), " readings for ", site_label, " repeat an earlier timestamp ",
+            "(records repeated by the analyzer, or more than one analyzer in `data`); all are used.",
+            call. = FALSE)
   list(sorted = sorted_data,
        slope_unit = if (length(u) == 1) paste0(u, " s-1") else NA_character_,
        h2o_start = if (length(h2o)) h2o[1] else NA_real_)
