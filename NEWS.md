@@ -13,6 +13,9 @@
   `r_square` and `fit_used` `NA` (were `-Inf` and the requested `fit_type`), and
   `r_square_regression` `NA` with `bubble_detection = TRUE`.
 
+* New column `slope_source` with `bubble_detection = TRUE`: `"total"` when `slope` is `slope_total`,
+  `"regression"` when it is `slope_regression`; `apply_ch4_review()` keeps it in step.
+
 ## `convert_ghg_unit()`
 
 * `ratio = TRUE` for N2O now divides by two N atoms (44.013 / 28.014 = 1.571; was 3.142, two times too

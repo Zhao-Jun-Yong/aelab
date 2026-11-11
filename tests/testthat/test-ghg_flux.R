@@ -424,10 +424,12 @@ test_that("calculate_regression bubble_detection = TRUE splits synthetic CH4 tra
   expect_equal(ramp$slope, ramp$slope_regression)
   expect_equal(ramp$slope, 1e-4, tolerance = 0.05)
   expect_equal(ramp$slope_ebullition, 0)
+  expect_equal(ramp$slope_source, "regression")
 
   set.seed(1); invisible(trace(NA)); step <- ch4_split(trace(100))
   expect_equal(step$ch4_flag, "ok")
   expect_equal(step$slope, step$slope_total)
+  expect_equal(step$slope_source, "total")
   expect_equal(step$flag, "ok")
   expect_gt(step$r_square, 0.9)  # the diffusion fit, not the regression across the step
   expect_false(isTRUE(all.equal(step$slope, step$slope_regression)))
@@ -451,6 +453,10 @@ test_that("calculate_regression bubble_detection = TRUE splits synthetic CH4 tra
   expect_true(is.na(early$slope_diffusion) && is.na(early$slope_ebullition))
 
   # the default leaves calculate_regression unchanged
+  expect_false("slope_source" %in% names(calculate_regression(
+    data.frame(real_datetime = as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei") + sec, CH4 = trace(NA)),
+    data.frame(date_time = as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei"), site = "x", analyzer = "a"),
+    "CH4", "date_time", "site", "a", duration_minutes = 299 / 60)))
   plain <- calculate_regression(data.frame(real_datetime = as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei") + sec,
                                            CH4 = trace(100)),
                                 data.frame(date_time = as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei"), site = "x", analyzer = "a"),
@@ -598,6 +604,8 @@ test_that("apply_ch4_review applies decisions", {
   expect_equal(out$slope[2], reg$slope_total[2])
   expect_true(is.na(out$slope_diffusion[2]))
   expect_equal(out$ch4_decision, c("not_bubble", "total"))
+  expect_equal(out$slope_source, c("regression", "total"))
+  expect_equal(apply_ch4_review(reg, dec[0, ])$slope_source, reg$slope_source)
 
   expect_equal(apply_ch4_review(reg, dec[0, ])$ch4_decision, ifelse(reg$review_needed, "unreviewed", "auto"))
   expect_equal(apply_ch4_review(reg, transform(dec, decision = "discard"))$flag, c("discard", "discard"))

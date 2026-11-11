@@ -277,7 +277,9 @@ A tibble with columns: \code{start_time}, \code{end_time} (date-times in Asia/Ta
   for the selected window), and \code{n_candidates} (number of deadband/cutoff candidates that
   produced a usable fit; \code{0} when the measurement was flagged \code{"discard"} because no
   candidate survived).
-  With \code{bubble_detection = TRUE} also \code{slope_regression}, \code{r_square_regression},
+  With \code{bubble_detection = TRUE} also \code{slope_source} (\code{"total"} when
+  \code{slope} is \code{slope_total}, \code{"regression"} when it is \code{slope_regression}),
+  \code{slope_regression}, \code{r_square_regression},
   \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression} (the
   regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}}),
   \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error, with the

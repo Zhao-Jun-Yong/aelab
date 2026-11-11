@@ -223,7 +223,9 @@
 #'   for the selected window), and \code{n_candidates} (number of deadband/cutoff candidates that
 #'   produced a usable fit; \code{0} when the measurement was flagged \code{"discard"} because no
 #'   candidate survived).
-#'   With \code{bubble_detection = TRUE} also \code{slope_regression}, \code{r_square_regression},
+#'   With \code{bubble_detection = TRUE} also \code{slope_source} (\code{"total"} when
+#'   \code{slope} is \code{slope_total}, \code{"regression"} when it is \code{slope_regression}),
+#'   \code{slope_regression}, \code{r_square_regression},
 #'   \code{correlation_regression}, \code{flag_regression}, \code{g_factor_regression} (the
 #'   regression fit, as with \code{bubble_detection = FALSE}; see \code{\link{apply_ch4_review}}),
 #'   \code{slope_total}, \code{slope_diffusion}, \code{slope_diffusion_se} (its standard error, with the
@@ -466,6 +468,7 @@ calculate_regression <- function(data, reference_df, ghg,
     )
     if (!is.null(split)) {
       out <- dplyr::bind_cols(out, tibble(
+        slope_source = if (startsWith(split$ch4_flag, "no bubble") || is.na(split$total)) "regression" else "total",
         slope_regression = split$regression,
         r_square_regression = if (no_fit) NA_real_ else reg_qc$r_square,
         correlation_regression = reg_qc$correlation, flag_regression = reg_qc$flag,
@@ -750,6 +753,8 @@ apply_ch4_review <- function(regression_result, decisions, by = c("site", "refer
   for (x in intersect("diffusion_r1", names(reg))) reg[[x]][nb] <- NA_real_
   reg$diffusion_start[nb] <- reg$start_time[nb]
   reg$diffusion_end[nb] <- reg$end_time[nb]
+  reg$slope_source[tot] <- "total"
+  reg$slope_source[nb] <- "regression"
   reg$flag[d %in% "discard"] <- "discard"
   reg$ch4_decision <- ifelse(!is.na(d), d, ifelse(reg$review_needed, "unreviewed", "auto"))
   reg
