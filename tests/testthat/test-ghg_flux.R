@@ -200,6 +200,17 @@ test_that("exp_tz fits C0, so a disturbed first reading does not move the slope"
   expect_equal(s2, 1, tolerance = 0.05)
 })
 
+test_that("exp_zhao18 takes C0 from a 15 s linear fit, not the first reading", {
+  tt <- 0:299
+  set.seed(5)
+  y <- 400 + 100 * (1 - exp(-0.01 * tt)) + stats::rnorm(300, 0, 3)
+  y_spike <- replace(y, 1, y[1] + 15)
+  expect_equal(.exp_curve_fit(y, tt, zhao = TRUE)$C0,
+               unname(stats::coef(stats::lm(y[1:16] ~ tt[1:16]))[1]))
+  expect_equal(.fit_ghg_model(y, tt, "exp_zhao18", t_zero = 0)$slope, 1, tolerance = 0.05)
+  expect_equal(.fit_ghg_model(y_spike, tt, "exp_zhao18", t_zero = 0)$slope, 1, tolerance = 0.1)
+})
+
 test_that("auto does not pick exp_tz for an accelerating curve", {
   # A convex exponential (Cm - C0 opposite to the slope) can fit an accelerating rise and read low
   tt <- 0:299

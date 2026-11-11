@@ -66,7 +66,8 @@ by gas name. The model chosen for each measurement is recorded in the \code{fit_
 The exponential models and their slope formulas follow fluxible (Gaudard et al. 2025); the curvature
 \code{b} is found by a one-dimensional search, with \code{Cm} and \code{a} solved by least squares for
 each \code{b}. \code{"exp_tz"} fits the initial concentration \code{C0} as well (Kutzbach et al.
-2007); \code{"exp_zhao18"} takes \code{C0} as the first reading. When the best \code{b} lies at the edge of its search range, or the fit does not
+2007); \code{"exp_zhao18"} fixes \code{C0} at the intercept of a linear fit over the first 15 s, as fluxible does
+(with \code{C0} free its \code{t0} could not be estimated). When the best \code{b} lies at the edge of its search range, or the fit does not
 depend on \code{b} (an exact line), the window has no usable curvature: an explicit exponential
 \code{fit_type} gives an \code{NA} slope and flag \code{"no_data"}, and \code{"auto"} keeps the linear or
 quadratic fit. A noisy straight line can still return an exponential slope; use \code{"auto"} when

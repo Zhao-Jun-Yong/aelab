@@ -51,8 +51,12 @@
 * `exp_tz` now fits the initial concentration `C0` with the other parameters (as in Kutzbach et
   al. 2007, p. 1010) instead of taking the first reading. In simulations with noise sd 3 this cut
   the spread of the slope from 8-18 % to 3-5 % of its true value. fluxible fixes `C0` at the
-  intercept of a 15 s linear fit (Gaudard et al. 2025, SI pp. 29-30). `exp_zhao18` keeps the
-  first reading, because its fitted `t0` overlaps with `C0`.
+  intercept of a 15 s linear fit (Gaudard et al. 2025, SI pp. 29-30). `exp_zhao18` now uses that
+  15 s intercept too, instead of the first reading: with `C0` free its `t0` could not be estimated
+  (the model reduces to `exp_tz`). The gain from fitting `C0` shrinks with autocorrelated noise
+  (RMSE 9.5 % vs 13 % with the first reading, AR(1) 0.8), and a mixing transient at the window
+  start still biases every method (+16 % to +54 % in simulations); a dead band (`start_offset_s`)
+  is the defence against that.
 * `fit_type = "auto"` accepts `exp_tz` only when the curve levels off (`Cm - C0` has the sign of
   the linear slope), the rule it already applied to the quadratic (Levy et al. 2011, p. 817).
 * A window whose readings are all equal is flagged `"zero"` (no trend), not `"no_data"`.

@@ -122,11 +122,15 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 # exp_tz fits C0 from all readings, as least-squares fits of exponential chamber models do
 # (Kutzbach et al. 2007, p. 1010); fluxible instead fixes it at the intercept of a 15 s linear
 # fit (Gaudard et al. 2025, SI pp. 29-30), with no stated reason; a single first reading carries
-# its full noise into the slope. exp_zhao18 keeps C0 = first reading: its fitted t0 overlaps C0.
+# its full noise into the slope. exp_zhao18 cannot fit C0: with C0 free, t0 is absorbed by C0 and
+# Cm and the model reduces to exp_tz, so C0 is fixed at fluxible's 15 s intercept instead.
 # A best b at the edge of the search range [0.05, 50] / window length means the window has no
 # usable curvature (linear, flat or a step): NULL, so the caller reports NA or skips the model.
 .exp_curve_fit <- function(conc, elapsed_s, zhao = FALSE) {
-  C0     <- conc[1]  # exp_zhao18 only
+  # exp_zhao18 only: C0 = intercept of a linear fit over the first 15 s (fluxible cz_window;
+  # Gaudard et al. 2025, SI pp. 29-30); the first reading if fewer than 3 readings fall there
+  first  <- elapsed_s - min(elapsed_s) <= 15
+  C0     <- if (sum(first) >= 3) stats::lm.fit(cbind(1, elapsed_s[first]), conc[first])$coefficients[[1]] else conc[1]
   ss_tot <- sum((conc - mean(conc))^2)
   d  <- max(elapsed_s) - min(elapsed_s)
   if (length(conc) < 5 || d <= 0) return(NULL)
@@ -588,7 +592,8 @@ convert_time <- function(data, day = 0, hr = 0, min = 0, sec = 0) {
 #'   The exponential models and their slope formulas follow fluxible (Gaudard et al. 2025); the curvature
 #'   \code{b} is found by a one-dimensional search, with \code{Cm} and \code{a} solved by least squares for
 #'   each \code{b}. \code{"exp_tz"} fits the initial concentration \code{C0} as well (Kutzbach et al.
-#'   2007); \code{"exp_zhao18"} takes \code{C0} as the first reading. When the best \code{b} lies at the edge of its search range, or the fit does not
+#'   2007); \code{"exp_zhao18"} fixes \code{C0} at the intercept of a linear fit over the first 15 s, as fluxible does
+#'   (with \code{C0} free its \code{t0} could not be estimated). When the best \code{b} lies at the edge of its search range, or the fit does not
 #'   depend on \code{b} (an exact line), the window has no usable curvature: an explicit exponential
 #'   \code{fit_type} gives an \code{NA} slope and flag \code{"no_data"}, and \code{"auto"} keeps the linear or
 #'   quadratic fit. A noisy straight line can still return an exponential slope; use \code{"auto"} when
