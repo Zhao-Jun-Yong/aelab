@@ -153,3 +153,18 @@ test_that("calculate_ghg_flux warns about review_needed closures without a decis
   expect_no_warning(calculate_ghg_flux(d))
   expect_no_warning(calculate_ghg_flux(d[, setdiff(names(d), "review_needed")]))
 })
+
+test_that("rows with nothing fitted have NA r_square and fit_used", {
+  t0 <- as.POSIXct("2024-01-01 08:00:00", tz = "Asia/Taipei")
+  d <- data.frame(date_time = t0 + 0:5, CH4 = 1:6)
+  ref <- data.frame(site = "s", date_time = t0)
+  r <- suppressWarnings(calculate_regression(d, ref, ghg = "CH4", fit_type = "auto",
+                                             instrument_precision = 0.6))
+  expect_equal(r$flag, "no_data")
+  expect_true(is.na(r$r_square) && is.na(r$fit_used))
+  b <- suppressWarnings(calculate_regression(d, ref, ghg = "CH4", bubble_detection = TRUE))
+  expect_true(is.na(b$r_square) && is.na(b$r_square_regression) && is.na(b$fit_used))
+  # a fitted row keeps both
+  fit <- bubble_closure("B1")
+  expect_false(is.na(fit$r_square) || is.na(fit$fit_used))
+})

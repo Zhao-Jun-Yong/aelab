@@ -9,6 +9,9 @@
 * `calculate_ghg_flux()` warns with a count when `review_needed` closures have no decision
   (`ch4_decision` `"unreviewed"` or missing); the flux is still calculated.
 * The vignette shows several gases in one table with `purrr::map_dfr()`.
+* Rows where nothing was fitted (`flag = "no_data"`, or a Pareto search with no candidate) have
+  `r_square` and `fit_used` `NA` (were `-Inf` and the requested `fit_type`), and
+  `r_square_regression` `NA` with `bubble_detection = TRUE`.
 
 ## `convert_ghg_unit()`
 

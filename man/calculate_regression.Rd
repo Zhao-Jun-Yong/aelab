@@ -263,7 +263,8 @@ A tibble with columns: \code{start_time}, \code{end_time} (date-times in Asia/Ta
   \code{NA} without that column),
   \code{r_square}, \code{correlation}, \code{b_param} (exponential curvature; \code{NA} for
   linear/quadratic), \code{fit_used} (model actually used: \code{"linear"}, \code{"quadratic"},
-  or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}),
+  or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}; \code{r_square}
+  and \code{fit_used} are \code{NA} when nothing was fitted, e.g. \code{flag = "no_data"}),
   \code{g_factor} (ratio of chosen slope to linear baseline slope; \code{NA} when
   \code{fit_used = "linear"} or for explicit non-auto fits),
   \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),

@@ -209,7 +209,8 @@
 #'   \code{NA} without that column),
 #'   \code{r_square}, \code{correlation}, \code{b_param} (exponential curvature; \code{NA} for
 #'   linear/quadratic), \code{fit_used} (model actually used: \code{"linear"}, \code{"quadratic"},
-#'   or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}),
+#'   or \code{"exp_tz"}; always matches \code{fit_type} unless \code{fit_type = "auto"}; \code{r_square}
+#'   and \code{fit_used} are \code{NA} when nothing was fitted, e.g. \code{flag = "no_data"}),
 #'   \code{g_factor} (ratio of chosen slope to linear baseline slope; \code{NA} when
 #'   \code{fit_used = "linear"} or for explicit non-auto fits),
 #'   \code{flag} (\code{"ok"}, \code{"discard"}, \code{"zero"}, or \code{"no_data"}),
@@ -428,6 +429,8 @@ calculate_regression <- function(data, reference_df, ghg,
       flag <- "discard"
     }
 
+    no_fit <- is.infinite(fit$r_square)  # nothing was fitted: r_square and fit_used are NA
+
     # CH4 split on the final window (Minaudo et al. 2026, pp. 3-4)
     split <- NULL
     if (bubble_detection) {
@@ -445,10 +448,10 @@ calculate_regression <- function(data, reference_df, ghg,
       h2o_start            = cl$h2o_start,
       slope                = fit$slope,
       slope_unit           = cl$slope_unit,
-      r_square             = fit$r_square,
+      r_square             = if (no_fit) NA_real_ else fit$r_square,
       correlation          = fit$cor,
       b_param              = fit$b_param,
-      fit_used             = fit$fit_used,
+      fit_used             = if (no_fit) NA_character_ else fit$fit_used,
       g_factor             = g_factor,
       flag                 = flag,
       below_mdf            = below_mdf,
@@ -463,7 +466,8 @@ calculate_regression <- function(data, reference_df, ghg,
     )
     if (!is.null(split)) {
       out <- dplyr::bind_cols(out, tibble(
-        slope_regression = split$regression, r_square_regression = reg_qc$r_square,
+        slope_regression = split$regression,
+        r_square_regression = if (no_fit) NA_real_ else reg_qc$r_square,
         correlation_regression = reg_qc$correlation, flag_regression = reg_qc$flag,
         g_factor_regression = reg_qc$g_factor, slope_total = split$total,
         slope_diffusion = split$diffusion, slope_diffusion_se = split$diff_se,
@@ -560,7 +564,7 @@ calculate_regression <- function(data, reference_df, ghg,
 }
 
 # What a window method returns: the chosen fit and window of one closure. The defaults describe
-# "no fit" (r_square -Inf, which the QC flag reports as no_data); the pareto fields stay NA for
+# "no fit" (r_square -Inf, which the QC flag reports as no_data and the output shows as NA); the pareto fields stay NA for
 # "fixed" and "sliding".
 .empty_window_fit <- function(fit_type) {
   no_time <- structure(NA_real_, class = c("POSIXct", "POSIXt"))
