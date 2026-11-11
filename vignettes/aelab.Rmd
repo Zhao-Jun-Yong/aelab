@@ -75,7 +75,7 @@ Now, we can perform regressions on the GHG concentrations using `calculate_regre
 Two window modes are available via `window_type`:
 
 - **`"sliding"`**: moves a fixed-length sub-window (default `num_rows = 300` rows ≈ 5 min) across the full measurement period and keeps the position with the highest R². Useful when the exact measurement start is uncertain.
-- **`"fixed"`** (default): fits a single window of `duration_minutes` starting at `start_offset_s` seconds after the reference time. More reproducible — all gases are evaluated over the same interval. The first 30 s of chamber deployment — the "dead-bar period" — are mechanically disturbed; skipping them with `start_offset_s = 30` is recommended.
+- **`"fixed"`** (default): fits a single window of `duration_minutes` starting at `start_offset_s` seconds after the reference time. More reproducible — all gases are evaluated over the same interval. The first 30 s of chamber deployment — the "dead band" — are mechanically disturbed; skipping them with `start_offset_s = 30` is recommended.
 
 ```{r}
 # Sliding window: best 5-min sub-window within 7-min period
@@ -83,7 +83,7 @@ calculate_regression(ch4, ref, ghg = "CH4", reference_time = "date_time",
                      site = "site", analyzer_code = "1337", window_type = "sliding",
                      duration_minutes = 7, num_rows = 300)
 
-# Fixed window: regress from t+30 s to t+7 min (skips dead-bar period)
+# Fixed window: regress from t+30 s to t+7 min (skips dead band)
 calculate_regression(ch4, ref, ghg = "CH4", reference_time = "date_time",
                      site = "site", analyzer_code = "1337",
                      window_type = "fixed", start_offset_s = 30)
@@ -91,7 +91,7 @@ calculate_regression(ch4, ref, ghg = "CH4", reference_time = "date_time",
 
 ### Per-row window overrides
 
-When `reference_df` contains a `duration_minutes` and/or `start_offset_s` column, a non-`NA` value in that column overrides the global parameter for that specific measurement. Rows without the column, or with `NA`, fall back to the global value. This is useful when individual closures have different deployment lengths or when one measurement needs a longer dead-bar skip.
+When `reference_df` contains a `duration_minutes` and/or `start_offset_s` column, a non-`NA` value in that column overrides the global parameter for that specific measurement. Rows without the column, or with `NA`, fall back to the global value. This is useful when individual closures have different deployment lengths or when one measurement needs a longer dead-band skip.
 
 ### Model selection
 
@@ -99,13 +99,13 @@ The `fit_type` parameter controls the regression model:
 
 - **`"linear"`** (default): ordinary least-squares slope. Valid when concentration change is small relative to ambient.
 - **`"quadratic"`**: second-order polynomial; the reported slope is the initial rate at t = 0 (the coefficient of *t*).
-- **`"exp_tz"`** / **`"exp_zhao18"`**: Hutchinson–Mosier nonlinear exponential models; slope evaluated at `t_zero`.
+- **`"exp_tz"`** / **`"exp_zhao18"`**: exponential models with a linear term (Zhao et al. 2018); slope evaluated at `t_zero`.
 - **`"auto"`**: tries linear → quadratic → exp_tz in sequence, accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a quadratic only when it levels off rather than accelerates (Levy et al. 2011), and an exponential only when its curvature parameter *b* does not exceed κ~max~ (Hüppi et al. 2018). The model chosen for each measurement is recorded in the `fit_used` output column.
 
 When `fit_type = "auto"`, analyser precision comes from `instrument_precision` (see Quality flags below) or, if that is not supplied, from the `CH4_prec`/`CO2_prec`/`N2O_prec` column that `tidy_ghg_analyzer()` adds to LI-COR data (values from the built-in `analyzer_precision` dataset). Other data need `instrument_precision`.
 
 ```{r}
-# Auto model selection with fixed window and 30-s dead-bar skip
+# Auto model selection with fixed window and 30-s dead-band skip
 calculate_regression(ch4, ref, ghg = "CH4", reference_time = "date_time",
                      site = "site", analyzer_code = "1337",
                      fit_type = "auto",
@@ -118,14 +118,16 @@ Each measurement receives a `flag` in the output:
 
 | Flag | Meaning |
 |---|---|
-| `ok` | R² ≥ threshold and correlation ≥ threshold; use this slope |
+| `ok` | R² ≥ threshold and correlation ≥ threshold |
 | `discard` | Detectable trend but poor fit (R² below threshold) |
 | `zero` | No detectable trend (correlation below threshold). A slope below precision ÷ window duration keeps its flag and gets `below_mdf = TRUE` |
 | `no_data` | Insufficient data in the window |
 
+The flag is a label only: `calculate_regression()` keeps the fitted slope for every flag, and nothing is dropped or set to zero. For a `zero` or `discard` closure, look at the fit (`plot_ghg_flux()`) and decide how to treat its slope. For CH4 closures with `bubble_detection = TRUE`, `flag` describes the diffusion fit only and is `NA` when there is no diffusion line; use `ch4_flag`, `review_needed` and `ch4_decision` there (see below).
+
 Two optional parameters tighten the quality control:
 
-- **`instrument_precision`**: analyser precision in ppm. Slopes whose absolute value falls below `precision / window_duration_s` are flagged `"zero"` even if R² passes. Also used by `fit_type = "auto"` to compute κ~max~ per measurement.
+- **`instrument_precision`**: analyser precision in the unit of the gas column (ppm for CO2, ppb for LI-COR CH4 and N2O). Slopes whose absolute value falls below `precision / window_duration_s` are flagged `"zero"` even if R² passes. Also used by `fit_type = "auto"` to compute κ~max~ per measurement.
 - **`g_factor_threshold`**: when `fit_type = "auto"` selects a nonlinear model, the g-factor (chosen slope / linear baseline slope) is computed and recorded in the `g_factor` output column. If `abs(g_factor) > g_factor_threshold`, the flag is overridden to `"discard"` (Gaudard et al. 2025). Default `NULL` (disabled).
 
 ### Method 2: Type directly in R
@@ -197,7 +199,7 @@ Therefore, the function `calculate_ghg_flux()` requires a dataframe with columns
 ```{r}
 results_ch4 <- calculate_regression(ch4, ref_direct, ghg = "CH4", reference_time = "date_time",
                                     site = "site", analyzer_code = "1337")
-# In practice, filter to flag == "ok" before calculating flux
+# The flux is calculated for every row; check `flag` (and `ch4_flag`) before using it
 flux_ch4 <- data.frame(
     slope      = results_ch4$slope,
     slope_unit = results_ch4$slope_unit, # "ppb s-1": LI-COR CH4, read by calculate_ghg_flux()
@@ -227,7 +229,7 @@ res[, c("slope", "slope_regression", "slope_diffusion", "slope_ebullition", "flu
         "flux_diffusion", "flux_ebullition", "ch4_flag")]
 ```
 
-`ch4_flag` labels closures to look at by eye (for example `"ebullition < diffusion + SE"`, or `"diffusion after first bubble"` when the diffusion segment starts after a bubble); the labels never change the values. For closures with a bubble, `slope` is the total, while `r_square`, `correlation` and `flag` describe the linear diffusion fit (the R² and correlation tests are for a straight line, not for the two-point total). `review_needed` is `TRUE` for every closure whose `ch4_flag` is not `"ok"` or a `"no bubble"` label. Bubble detection needs `window_type = "fixed"` (the default).
+`ch4_flag` labels closures to look at by eye (for example `"ebullition < diffusion + SE"`, or `"diffusion after first bubble"` when the diffusion segment starts after a bubble); the labels never change the values. For closures with a bubble, `slope` is the total, while `r_square`, `correlation` and `flag` describe the linear diffusion fit (the R² and correlation tests are for a straight line, not for the two-point total). `review_needed` is `TRUE` for every closure whose `ch4_flag` is not `"ok"` or a `"no bubble"` label; what to do with those closures is left to you. Bubble detection needs `window_type = "fixed"` (the default).
 
 After looking at the closures with `review_needed = TRUE`, record one decision per closure (`accept`, `total` for total only, `not_bubble` to use the regression fit, `discard`) and apply them with `apply_ch4_review()`; closures still needing review are marked `"unreviewed"`:
 
@@ -244,6 +246,17 @@ reg2 <- calculate_regression(readings, ref, "CH4", reference_time = "date_time",
                              duration_minutes = 299 / 60, bubble_detection = TRUE,
                              ch4_options = list(min_rise = 0.1))  # the 50 ppb step is now no bubble
 reg2[, c("slope", "slope_diffusion", "slope_ebullition", "ch4_flag")]
+```
+
+### From readings to a flux in the unit you need
+
+The steps above in one chain: regression with bubble detection, one review decision, flux, unit conversion.
+
+```{r}
+rev <- apply_ch4_review(reg, dec)
+flux <- calculate_ghg_flux(cbind(rev, area = 1, volume = 1, temp = 25))  # mmol m-2 h-1
+flux$flux_mg <- convert_ghg_unit(flux$flux, ghg = "ch4", mass = "mmol", to_mass = "mg")
+flux[, c("ch4_decision", "flux", "flux_diffusion", "flux_ebullition", "flux_mg")]
 ```
 
 ## Additional GHG tools
@@ -544,3 +557,5 @@ Hüppi, R., Felber, R., Krauss, M., Six, J., Leifeld, J., & Fuß, R. (2018). Res
 Staehr, P. A., Bade, D., Van de Bogert, M. C., Koch, G. R., Williamson, C., Hanson, P., Cole, J. J., & Kratz, T. (2010). Lake metabolism and the diel oxygen technique: State of the science. Limnology and Oceanography: Methods, 8(11), 628–644. https://doi.org/10.4319/lom.2010.8.0628
 
 Yong, Z.-J., Lin, W.-J., Lin, C.-W., & Lin, H.-J. (2024). Tidal influence on carbon dioxide and methane fluxes from tree stems and soils in mangrove forests. Biogeosciences, 21(22), 5247–5260. https://doi.org/10.5194/bg-21-5247-2024
+
+Zhao, P., Hammerle, A., Zeeman, M., & Wohlfahrt, G. (2018). On the calculation of daytime CO2 fluxes measured by automated closed transparent chambers. Agricultural and Forest Meteorology, 263, 267–275. https://doi.org/10.1016/j.agrformet.2018.08.022
