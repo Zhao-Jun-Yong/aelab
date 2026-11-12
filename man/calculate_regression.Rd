@@ -82,12 +82,12 @@ When \code{reference_df} contains a \code{start_offset_s} column, the per-row va
 Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.}
 
 \item{instrument_precision}{Optional. Analyser precision (\eqn{1\sigma}{1 sigma}) in the same concentration unit as
-the \code{ghg} column (ppb for LI-COR CH4/N2O, ppm for CO2). Used in three ways:
+the \code{ghg} column (ppb for LI-COR CH4/N2O, ppm for CO2). Used in four ways:
 (1) minimum-detectable-slope check - \code{below_mdf} is \code{TRUE} when the absolute slope
 falls below \code{instrument_precision / window_duration_s}; the flag is not changed, because
 low fluxes with a good fit are kept (Gaudard et al. 2025; Maier et al. 2022); (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
 (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
-fluxes permit more curvature and near-detection-limit measurements are kept linear; (3) the slope-error score of \code{window_type = "pareto"}.}
+fluxes permit more curvature and near-detection-limit measurements are kept linear; (3) the slope-error score of \code{window_type = "pareto"}; (4) the variance floor of the bubble flag when \code{ch4_options = list(bubble_floor = "noise")}.}
 
 \item{kappamax}{Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
 Only applies when \code{fit_type} is \code{"exp_tz"}, \code{"exp_zhao18"} or \code{"exp_hm"}. When \eqn{b > \kappa_{max}},
@@ -142,7 +142,7 @@ Calculate the slope of GHG concentration change over time using linear or expone
 With \code{fit_type = "auto"} the model is chosen by trying linear -> quadratic -> exp_tz in order,
 accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a
 quadratic only when it levels off rather than accelerates (Levy et al. 2011), and exp_tz only
-when it levels off and its curvature parameter does not exceed \code{kappamax}. When \code{fit_type = "auto"} or \code{window_type = "pareto"} and
+when it levels off and its curvature parameter does not exceed \code{kappamax}. When \code{fit_type = "auto"}, \code{window_type = "pareto"} or \code{bubble_floor = "noise"} and
 \code{instrument_precision = NULL}, precision is taken from the \code{<ghg>_prec} column that
 \code{\link{tidy_ghg_analyzer}} adds (an error without it). The model chosen for each measurement is recorded in the \code{fit_used} output column.
 

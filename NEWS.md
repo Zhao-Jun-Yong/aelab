@@ -1,5 +1,17 @@
 # aelab (development version)
 
+## Bubble detection: optional noise floor
+
+* `ch4_options` gains `bubble_floor` (`"fixed"`, the default and unchanged, or `"noise"`) and `bubble_alpha`
+  (default 0.05). With `"noise"` the variance floor of the bubble flag comes from `instrument_precision`
+  (or the `<ghg>_prec` column) instead of the fixed 1e-4, and the window statistic is the variance left
+  after fitting a straight line in the window. In simulation (step bubbles, noise 0.6 ppb, 1 Hz
+  logging, fluxes up to 2 ppb/s) it finds bubbles of 10-20 ppb that the fixed floor misses, and a steady
+  rise did not trigger it. Readings logged slower than 1 s stop with an error; `instrument_precision` must
+  be one positive number. It departs from Minaudo et al. (2026), assumes
+  `instrument_precision` is not below the real noise (for closures of about 2 minutes or more a warning is
+  given when the within-window residual spread is above 1.1 times it), and has been checked only on simulated closures.
+
 ## Pareto window search cut down
 
 * `window_type = "pareto"` no longer reports an uncertainty interval. Removed: the residual bootstrap
