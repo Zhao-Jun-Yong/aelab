@@ -1,5 +1,19 @@
 # aelab (development version)
 
+## Pareto window search cut down
+
+* `window_type = "pareto"` no longer reports an uncertainty interval. Removed: the residual bootstrap
+  (`n_boot`), the columns `slope_uncertainty_lo` and `slope_uncertainty_hi`, and the winner's-curse
+  widening (with `data-raw/calibrate_pareto_front_correlation.R`). The widening had no published source
+  and was calibrated only on simulated data. Windows are now scored on `rmse` and an approximate slope
+  standard error, `instrument_precision / sqrt(Sxx)` (sensor precision, as in Kobayashi et al., so the two scores
+  do not both fall with `rmse`); the pick is still the front member closest to the ideal corner.
+* The pick no longer min-max scales the two scores over the candidates, so it no longer changes with
+  `cutoff_step`. The misfit is `max(rmse / instrument_precision - 1, 0)` and the precision loss is the
+  slope standard error relative to that of all readings, minus 1. A tie goes to the longer window.
+  The `kappamax` gate, the `zero`/`discard` flags and the one-time experimental message stay.
+* The pareto columns are now three: `deadband`, `cutoff`, `n_candidates`.
+
 ## Reading and QC columns
 
 * `tidy_ghg_analyzer()` reads a LI-COR `.data` text file directly (`analyzer = "licor"`, chosen by the
@@ -25,12 +39,11 @@
 
 ## `fit_type = "auto"`: parameter count of `exp_tz`
 
-* The AICc, the minimum number of readings and the pareto bootstrap's degrees-of-freedom correction counted
+* The AICc, and the minimum number of readings counted
   `exp_tz` as 3 fitted parameters; since `C0` is fitted it has 4 (`Cm`, `a`, `C0`, `b`). With the right
   count `"auto"` needs a larger AICc gain to accept `exp_tz`, so a closure where it barely improved on the
   linear fit now stays linear (1 of 6 synthetic test closures; the CarbonIMTA-based fixtures are unchanged).
-  Explicit `fit_type = "exp_tz"` gives the same fits; with `window_type = "pareto"` its bootstrap
-  uncertainty bounds shift slightly, which can change the selected window.
+  Explicit `fit_type = "exp_tz"` gives the same fits.
 
 ## `exp_hm`
 
@@ -68,7 +81,7 @@
   and the number of readings; all of them are still used.
 * `calculate_total_co2e()` no longer prints messages by default; `verbose = TRUE` prints the fluxes,
   the GWPs used and the total.
-* Help of `calculate_regression()`: the five pareto columns are always present (`NA` unless
+* Help of `calculate_regression()`: the pareto columns are always present (`NA` unless
   `window_type = "pareto"`).
 * `fit_type = "auto"`: the unsourced fallback `kmax = 1.5 / duration` is gone; `kmax` is always
   `|slope_lm| / precision` (a flat line gives 0). Reached only with a zero linear slope, where the

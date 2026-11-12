@@ -27,7 +27,6 @@ calculate_regression(
   deadband_step = 10,
   min_window_size = 60,
   cutoff_step = 10,
-  n_boot = 200,
   bubble_detection = FALSE,
   ch4_options = list(),
   min_obs = 60
@@ -83,12 +82,12 @@ When \code{reference_df} contains a \code{start_offset_s} column, the per-row va
 Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.}
 
 \item{instrument_precision}{Optional. Analyser precision (\eqn{1\sigma}{1 sigma}) in the same concentration unit as
-the \code{ghg} column (ppb for LI-COR CH4/N2O, ppm for CO2). Used in two ways:
+the \code{ghg} column (ppb for LI-COR CH4/N2O, ppm for CO2). Used in three ways:
 (1) minimum-detectable-slope check - \code{below_mdf} is \code{TRUE} when the absolute slope
 falls below \code{instrument_precision / window_duration_s}; the flag is not changed, because
 low fluxes with a good fit are kept (Gaudard et al. 2025; Maier et al. 2022); (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
 (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
-fluxes permit more curvature and near-detection-limit measurements are kept linear.}
+fluxes permit more curvature and near-detection-limit measurements are kept linear; (3) the slope-error score of \code{window_type = "pareto"}.}
 
 \item{kappamax}{Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
 Only applies when \code{fit_type} is \code{"exp_tz"}, \code{"exp_zhao18"} or \code{"exp_hm"}. When \eqn{b > \kappa_{max}},
@@ -118,14 +117,6 @@ no dead-band at all.}
 \code{cutoff_step} (default 10) is the step size of the candidate cutoff-time grid, which runs
 from \code{min_deadband + min_window_size} to the window's own maximum elapsed time.}
 
-\item{n_boot}{Only used when \code{window_type = "pareto"}. Number of residual-bootstrap refits
-used to estimate each candidate window's slope uncertainty (16th/84th percentile of the
-bootstrapped slopes). Default 200. Each refit resamples (with replacement) the candidate's
-own degrees-of-freedom-corrected residuals (\code{resid * sqrt(n / (n - p))}, \code{p} = number
-of fitted parameters for the model actually used), adds them to the candidate's fitted
-values to build a synthetic concentration series, and refits the same model family via
-\code{\link{calculate_regression}}'s internal fitting routine - no MCMC and no new dependency.}
-
 \item{bubble_detection}{\code{FALSE} (default) returns the regression slope only. \code{TRUE}
 (for CH4) splits each closure into total, diffusive and ebullitive slopes; see section
 \emph{CH4 bubble detection} (\code{window_type = "fixed"} only).}
@@ -151,7 +142,7 @@ Calculate the slope of GHG concentration change over time using linear or expone
 With \code{fit_type = "auto"} the model is chosen by trying linear -> quadratic -> exp_tz in order,
 accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a
 quadratic only when it levels off rather than accelerates (Levy et al. 2011), and exp_tz only
-when it levels off and its curvature parameter does not exceed \code{kappamax}. When \code{fit_type = "auto"} and
+when it levels off and its curvature parameter does not exceed \code{kappamax}. When \code{fit_type = "auto"} or \code{window_type = "pareto"} and
 \code{instrument_precision = NULL}, precision is taken from the \code{<ghg>_prec} column that
 \code{\link{tidy_ghg_analyzer}} adds (an error without it). The model chosen for each measurement is recorded in the \code{fit_used} output column.
 
@@ -178,21 +169,25 @@ running for \code{duration_minutes}, so all gases are regressed over the same ti
 \code{"sliding"} selects the \code{num_rows}-length sub-window with the best R\eqn{^2} within
 the measurement period.
 
-  \code{"pareto"} independently searches deadband (start skip) and cutoff (window end) times,
-  trading off fit quality against propagated slope uncertainty via a Pareto front - adapted
-  from the window-selection idea in Kobayashi et al. (2026), with two
-  deliberate differences from that method: the existing \code{kappamax} gate is always applied
-  (no candidate can be a numerically degenerate exponential fit), and a candidate pool that is
-  empty or whose selected window fails the existing \code{zero}/\code{discard} checks is
-  reported as such rather than returning a confident-looking number (see \code{flag}).
-
-  \strong{Experimental, \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi} not yet
-  validated for reporting.} The winner's-curse correction applied to this interval (see
-  \code{.pareto_winners_curse_correct()}'s source comment) is calibrated only against
-  idealized synthetic data (i.i.d. Gaussian noise around an exactly linear trend) - not yet
-  checked against real chamber closures, autocorrelated noise, or non-linear true trends. Do
-  not cite these intervals as validated in a manuscript or report until that broader
-  validation is done; \code{window_type = "fixed"}/\code{"sliding"} are unaffected by this.
+  \code{"pareto"} (experimental) searches deadband (start skip) and cutoff (window end) times.
+  Each candidate window is fitted with \code{fit_type} (the \code{kappamax} gate always applies)
+  and scored on two values to minimise: \code{rmse}, and an approximate slope standard error,
+  \code{instrument_precision / sqrt(Sxx)}, where \code{Sxx} is the sum of squared deviations of
+  the window's times from their mean. The second value depends only on the window's length and
+  spread, so it falls for longer windows while \code{rmse} tends to rise. Candidates that no other
+  candidate beats on both values form the Pareto front. Before the pick, the two values are put
+  on fixed scales that do not depend on the candidate grid: the misfit is
+  \code{max(rmse / instrument_precision - 1, 0)} (rmse above the noise level, in units of the
+  precision), and the precision loss is the slope standard error divided by that of all readings
+  from \code{min_deadband} on, minus 1. The front member closest to (0, 0) is chosen; a tie goes
+  to the longer window. The misfit has the same ordering as the mean Gaussian log-likelihood with
+  \code{sigma = instrument_precision} used by Kobayashi et al. (2026). The deadband x cutoff
+  search, the Pareto front and the closest-to-ideal pick follow that paper, which uses an MCMC
+  uncertainty of a Hutchinson-Mosier fit instead of the slope standard error here; the two scores
+  as scaled here and the model choice are aelab's own, and have not been validated against real
+  closures. Only the chosen window's slope is reported, with no uncertainty
+  interval. An empty candidate pool is flagged \code{"discard"}, and the chosen window goes
+  through the same \code{zero}/\code{discard} checks as any other (see \code{flag}).
 }
 
 \section{CH4 bubble detection}{
@@ -253,11 +248,10 @@ A tibble with these columns.
   \code{reference_time}, \code{site}, \code{analyzer} \tab \cr
 }
 
-Five more columns are always present and \code{NA} unless \code{window_type = "pareto"}:
+Three more columns are always present and \code{NA} unless \code{window_type = "pareto"}:
 
 \tabular{ll}{
   \code{deadband}, \code{cutoff} \tab the selected candidate window, seconds from the reference time \cr
-  \code{slope_uncertainty_lo}, \code{slope_uncertainty_hi} \tab 16th/84th percentile of the residual-bootstrap slope distribution for the selected window \cr
   \code{n_candidates} \tab number of deadband/cutoff candidates that produced a usable fit; \code{0} when the measurement was flagged \code{"discard"} because no candidate survived \cr
 }
 
@@ -364,15 +358,6 @@ on histic Gleysol along soil carbon and drainage gradients. \emph{Biogeosciences
 Kobayashi, A. N. A., Roques, C., Hunkeler, D., & Brunner, P. (2026). Uncertainty
 quantification in soil gas fluxes: Reducing the user's arbitrariness. \emph{European Journal
 of Soil Science}, 77, e70415. \doi{10.1111/ejss.70415}
-
-Zrnic, T., & Fithian, W. (2025). A flexible defense against the winner's curse. \emph{The Annals
-of Statistics}, 53(6). \doi{10.1214/25-AOS2553}
-The \code{window_type = "pareto"} \code{slope_uncertainty_lo}/\code{slope_uncertainty_hi}
-interval applies a correction inspired by (not an implementation of) this paper's Section 4
-"effective Bonferroni" idea to the winner's-curse bias in the selected candidate's bootstrap
-interval, sized by Pareto-front membership with an empirically-calibrated (not analytically
-derived) correlation discount - see \code{.pareto_winners_curse_correct()}'s source comment
-for calibration caveats not yet resolved for real field data.
 
 Minaudo, C., et al. (2026). Uncertainty in aquatic greenhouse gas flux estimates arises from
 subjective processing of floating chamber time series. \emph{Limnology and Oceanography:

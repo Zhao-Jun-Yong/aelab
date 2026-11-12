@@ -201,8 +201,7 @@
 }
 
 # Internal helper: number of parameters fitted to the readings for each model, used for the minimum
-# readings of a fit, the AICc of fit_type = "auto" and the degrees-of-freedom correction in
-# .pareto_select_window()'s residual bootstrap. exp_tz: Cm, a, C0, b; exp_hm: Cm, C0, b;
+# readings of a fit and the AICc of fit_type = "auto". exp_tz: Cm, a, C0, b; exp_hm: Cm, C0, b;
 # exp_zhao18: Cm, a, b, t0 (C0 is fixed at the 15 s intercept).
 .n_fit_params <- function(fit_used) {
   switch(fit_used,
@@ -212,18 +211,4 @@
          exp_hm     = 3L,
          exp_zhao18 = 4L,
          2L)
-}
-
-# Internal helper: degrees-of-freedom-corrected residuals for residual resampling, used by
-# .pareto_select_window()'s uncertainty bootstrap. Inflates residuals by sqrt(n / (n - p)) so the
-# resampled residual pool's variance matches the estimated (not merely observed) residual
-# variance - the standard small-sample correction for residual-resampling bootstraps (Davison &
-# Hinkley 1997). Guarded at n - p <= 0 (not expected given min_window_size's default of 60, but a
-# floor here avoids a negative-or-zero denominator producing NaN/Inf): falls back to an
-# uncorrected (factor 1) copy of resid rather than propagating NaN.
-.dof_corrected_residuals <- function(resid, p) {
-  n  <- length(resid)
-  df <- n - p
-  if (df <= 0) return(resid)
-  resid * sqrt(n / df)
 }

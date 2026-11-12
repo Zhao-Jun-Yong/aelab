@@ -103,7 +103,7 @@ The `fit_type` parameter controls the regression model:
 - **`"exp_hm"`**: the Hutchinson-Mosier exponential without the linear term, for comparison; its slope is evaluated at `t_zero`, and `"auto"` never chooses it.
 - **`"auto"`**: tries linear → quadratic → exp_tz in sequence, accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a quadratic only when it levels off rather than accelerates (Levy et al. 2011), and an exponential only when its curvature parameter *b* does not exceed κ~max~ (Hüppi et al. 2018). The model chosen for each measurement is recorded in the `fit_used` output column.
 
-When `fit_type = "auto"`, analyser precision comes from `instrument_precision` (see Quality flags below) or, if that is not supplied, from the `CH4_prec`/`CO2_prec`/`N2O_prec` column that `tidy_ghg_analyzer()` adds to LI-COR data (values from the built-in `analyzer_precision` dataset). Other data need `instrument_precision`.
+When `fit_type = "auto"` or `window_type = "pareto"`, analyser precision comes from `instrument_precision` (see Quality flags below) or, if that is not supplied, from the `CH4_prec`/`CO2_prec`/`N2O_prec` column that `tidy_ghg_analyzer()` adds to LI-COR data (values from the built-in `analyzer_precision` dataset). Other data need `instrument_precision`.
 
 ```{r}
 # Auto model selection with fixed window and 30-s dead-band skip

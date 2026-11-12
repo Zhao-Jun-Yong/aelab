@@ -60,7 +60,7 @@ test_that("calculate_regression output is unchanged: fixtures", {
     pareto    = {
       set.seed(1)
       one("B1", fit_type = "auto", window_type = "pareto", instrument_precision = 0.6,
-          n_boot = 20, cutoff_step = 40)
+          cutoff_step = 40)
     },
     bubble_b1 = one("B1", fit_type = "auto", bubble_detection = TRUE),
     bubble_b2 = one("B2", fit_type = "auto", bubble_detection = TRUE),
