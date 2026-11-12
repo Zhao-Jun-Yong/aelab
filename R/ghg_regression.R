@@ -59,28 +59,6 @@
 #'     \item{\code{min_diffusion_s}}{Shortest diffusion segment, in seconds. Default 20 (the
 #'       code archive's \code{length.min}); FluxSeparator needs more than 50 readings (Sø et al.
 #'       2024, p. 8).}
-#'     \item{\code{bubble_floor}}{\code{"fixed"} (default) flags windows whose variance of
-#'       \code{conc / mean(conc)} exceeds the larger of 1e-4 (the paper's "arbitrary minimum") and
-#'       the \code{bubble_prob} percentile. \code{"noise"} replaces the 1e-4 with a floor from the
-#'       analyser precision (\code{instrument_precision}, or the \code{<ghg>_prec} column), and uses
-#'       the residual variance of a straight line fitted in each window as the window statistic, so a
-#'       steady rise is not counted as variance. The floor is
-#'       \eqn{(\sigma / \bar c)^2 \chi^2_{1 - \alpha/m,\, w - 2} / (w - 2)}{(sigma / mean)^2 * qchisq(1 - alpha / m, w - 2) / (w - 2)}
-#'       for \eqn{m} windows of \eqn{w = } \code{bubble_window} readings: the residual sum of squares of a
-#'       straight-line fit to normal noise is \eqn{\sigma^2 \chi^2_{w-2}}{sigma^2 * chi-square(w - 2)}
-#'       (Casella and Berger 2002, Section 5.3 and chapter 11), and \eqn{\alpha/m} is the Bonferroni
-#'       adjustment (Bonferroni inequality, as applied to multiple comparisons by Dunn 1961; the windows
-#'       overlap, so \code{bubble_alpha} is an upper bound on the family-wise error). This departs from the
-#'       paper and has been checked only on simulated closures (normal and AR(1) noise, step bubbles,
-#'       1 Hz logging, fluxes up to 2 ppb/s). It assumes white noise at the logging rate, so readings
-#'       logged slower than 1 s stop with an error, and it assumes \code{instrument_precision} is not
-#'       below the real noise (one positive number is required); an assumed precision 20\% too low raised
-#'       false bubbles in simulation. For closures with at least 120 windows a warning is given when the
-#'       within-window residual spread is above 1.1 times \code{instrument_precision} (1.1 is aelab's
-#'       choice); it is unreliable for short closures, autocorrelated noise and frequent bubbles. Needs
-#'       \code{bubble_window >= 3}.}
-#'     \item{\code{bubble_alpha}}{Family-wise level of the \code{"noise"} floor, default 0.05
-#'       (convention).}
 #'   }
 NULL
 
@@ -138,12 +116,12 @@ NULL
 #' @param cor_threshold Minimum absolute Pearson correlation between concentration and elapsed time.
 #'   Measurements below this have no detectable trend and are flagged \code{"zero"}. Default 0.5.
 #' @param instrument_precision Optional. Analyser precision (\eqn{1\sigma}{1 sigma}) in the same concentration unit as
-#'   the \code{ghg} column (ppb for LI-COR CH4/N2O, ppm for CO2). Used in four ways:
+#'   the \code{ghg} column (ppb for LI-COR CH4/N2O, ppm for CO2). Used in three ways:
 #'   (1) minimum-detectable-slope check - \code{below_mdf} is \code{TRUE} when the absolute slope
 #'   falls below \code{instrument_precision / window_duration_s}; the flag is not changed, because
 #'   low fluxes with a good fit are kept (Gaudard et al. 2025; Maier et al. 2022); (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
 #'   (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
-#'   fluxes permit more curvature and near-detection-limit measurements are kept linear; (3) the slope-error score of \code{window_type = "pareto"}; (4) the variance floor of the bubble flag when \code{ch4_options = list(bubble_floor = "noise")}.
+#'   fluxes permit more curvature and near-detection-limit measurements are kept linear; (3) the slope-error score of \code{window_type = "pareto"}.
 #' @param kappamax Optional. Maximum acceptable exponential curvature parameter \eqn{b} (s\eqn{^{-1}}).
 #'   Only applies when \code{fit_type} is \code{"exp_tz"}, \code{"exp_zhao18"} or \code{"exp_hm"}. When \eqn{b > \kappa_{max}},
 #'   the fit implies an implausibly fast equilibration and the slope is replaced by the linear
@@ -172,7 +150,7 @@ NULL
 #' With \code{fit_type = "auto"} the model is chosen by trying linear -> quadratic -> exp_tz in order,
 #' accepting a more complex model only when its AICc is lower (Kutzbach et al. 2007), a
 #' quadratic only when it levels off rather than accelerates (Levy et al. 2011), and exp_tz only
-#' when it levels off and its curvature parameter does not exceed \code{kappamax}. When \code{fit_type = "auto"}, \code{window_type = "pareto"} or \code{bubble_floor = "noise"} and
+#' when it levels off and its curvature parameter does not exceed \code{kappamax}. When \code{fit_type = "auto"} or \code{window_type = "pareto"} and
 #' \code{instrument_precision = NULL}, precision is taken from the \code{<ghg>_prec} column that
 #' \code{\link{tidy_ghg_analyzer}} adds (an error without it). The model chosen for each measurement is recorded in the \code{fit_used} output column.
 #'
@@ -415,8 +393,7 @@ calculate_regression <- function(data, reference_df, ghg,
                                   fit_type, window_type, bubble_detection, ch4_options, min_obs,
                                   num_rows)
   ch4_opt <- chk$ch4_opt; need <- chk$need; reference_df <- chk$reference_df
-  instrument_precision <- .resolve_precision(data, ghg, instrument_precision, fit_type, window_type,
-                                             noise_floor = bubble_detection && ch4_opt$bubble_floor == "noise")
+  instrument_precision <- .resolve_precision(data, ghg, instrument_precision, fit_type, window_type)
 
   reference_time_vec <- lubridate::force_tz(reference_df[[reference_time]], tzone = "Asia/Taipei")
   reference_site     <- as.character(reference_df[[site]])
@@ -605,19 +582,16 @@ calculate_regression <- function(data, reference_df, ghg,
   list(ch4_opt = ch4_opt, need = need, reference_df = reference_df[keep, , drop = FALSE])
 }
 
-# fit_type = "auto" (kappamax), window_type = "pareto" (slope SE score) and bubble_floor = "noise" need a precision: instrument_precision, else the <ghg>_prec column tidy_ghg_analyzer() adds, in the
+# fit_type = "auto" (kappamax) and window_type = "pareto" (slope SE score) need a precision: instrument_precision, else the <ghg>_prec column tidy_ghg_analyzer() adds, in the
 # data's unit (as goFlux's prec argument and <gas>_prec columns; no guessing from analyzer names)
-.resolve_precision <- function(data, ghg, instrument_precision, fit_type, window_type, noise_floor = FALSE) {
-  if ((fit_type == "auto" || window_type == "pareto" || noise_floor) && is.null(instrument_precision)) {
+.resolve_precision <- function(data, ghg, instrument_precision, fit_type, window_type) {
+  if ((fit_type == "auto" || window_type == "pareto") && is.null(instrument_precision)) {
     p <- unique(stats::na.omit(data[[paste0(ghg, "_prec")]]))
     if (length(p) != 1)
-      stop("fit_type = \"auto\", window_type = \"pareto\" or ch4_options bubble_floor = \"noise\" needs instrument_precision, or one value in a `",
+      stop("fit_type = \"auto\" or window_type = \"pareto\" needs instrument_precision, or one value in a `",
            ghg, "_prec` column of `data` (added by tidy_ghg_analyzer() for LI-COR data).")
     instrument_precision <- p
   }
-  if (noise_floor && !(is.numeric(instrument_precision) && length(instrument_precision) == 1 &&
-                       is.finite(instrument_precision) && instrument_precision > 0))
-    stop("ch4_options bubble_floor = \"noise\" needs one positive instrument_precision.", call. = FALSE)
   instrument_precision
 }
 
@@ -741,7 +715,7 @@ calculate_regression <- function(data, reference_df, ghg,
   win <- if (is.na(fit$start_dt)) sorted_data[0, ] else
     sorted_data[sorted_data$real_datetime >= fit$start_dt & sorted_data$real_datetime <= fit$end_dt, ]
   split <- .separate_ch4(as.numeric(win$real_datetime), as.numeric(win[[ghg]]), ch4_opt,
-                         as.numeric(reference_datetime), noise_sd = if (is.null(instrument_precision)) NA_real_ else instrument_precision)
+                         as.numeric(reference_datetime))
   split$regression <- fit$slope
   reg_qc <- list(r_square = fit$r_square, rmse = fit$rmse, slope_se = fit$slope_se, correlation = fit$cor,
                  flag = flag, g_factor = g_factor, below_mdf = below_mdf)

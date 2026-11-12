@@ -3,8 +3,7 @@
   opt <- list(bubble_window = 10, bubble_align = "centre", bubble_prob = 0.75, merge_gap = 10,
               min_len = 5, early_s = 20, early_from = "window", total_from = "window",
               spar = 0.5, nknots_ratio = 1/3, trim_to_min = TRUE, neg_ebullition = "zero",
-              min_rise = 0, bubble_pad = 0, min_diffusion_s = 20,
-              bubble_floor = "fixed", bubble_alpha = 0.05)
+              min_rise = 0, bubble_pad = 0, min_diffusion_s = 20)
   if (!is.list(ch4_options)) stop("ch4_options must be a named list.")
   if (length(ch4_options) && (is.null(names(ch4_options)) || any(names(ch4_options) == "")))
     stop("Every ch4_options element needs a name.")
@@ -22,35 +21,21 @@
   num("merge_gap", 0, whole = TRUE); num("min_len", 1, whole = TRUE); num("early_s", 0)
   num("spar", 0, lo_open = TRUE); num("nknots_ratio", 0, 1, lo_open = TRUE); num("min_rise", 0)
   num("bubble_pad", 0, whole = TRUE); num("min_diffusion_s", 0, lo_open = TRUE)
-  num("bubble_alpha", 0, 1, lo_open = TRUE)
   if (!isTRUE(opt$trim_to_min) && !isFALSE(opt$trim_to_min))
     stop("trim_to_min must be TRUE or FALSE.", call. = FALSE)
   opt$bubble_align   <- match.arg(opt$bubble_align, c("centre", "start", "end"))
   opt$early_from     <- match.arg(opt$early_from, c("window", "placement"))
   opt$total_from     <- match.arg(opt$total_from, c("window", "segment"))
   opt$neg_ebullition <- match.arg(opt$neg_ebullition, c("zero", "keep", "na"))
-  opt$bubble_floor   <- match.arg(opt$bubble_floor, c("fixed", "noise"))
-  if (opt$bubble_floor == "noise" && opt$bubble_window < 3)
-    stop("bubble_floor = \"noise\" needs bubble_window >= 3.", call. = FALSE)
   opt
 }
 
 # Bubble detection of Minaudo et al. (2026, p. 4): logical flag per reading; t in seconds from 0.
 # Run on readings linearly interpolated to a 1 s grid, as the code archive (find_bubbles.R,
 # lines 35-36), so window, merge_gap and min_len are seconds whatever the logging interval or gaps.
-# min_thresh = 1e-4 (floor of the variance cut-off) is the paper's "arbitrary minimum" (p. 7-8).
-# noise_sd (the analyser's 1 s standard deviation, in the unit of conc) switches to the noise floor:
-# the window statistic is the residual variance of a straight line fitted in the window (so a steady
-# rise is not variance), and the floor is the sigma^2 chi-square quantile of that statistic
-# (residual sum of squares ~ sigma^2 chi^2 with window - 2 df; Casella & Berger 2002, Section 5.3 and
-# ch. 11), Bonferroni-adjusted over the number of windows (Dunn 1961), at family-wise level alpha
-# (0.05 is convention); because the windows overlap this is a bound: the simulated family-wise error was
-# 0.2-2%. The floor assumes white noise at the logging rate, so readings logged slower than 1 s (which
-# the 1 s interpolation would smooth) stop with an error. It warns, for closures with at least 120
-# windows, when the within-window residual spread exceeds 1.1 noise_sd (1.1 is aelab's choice; the
-# spread understates the noise for autocorrelated readings and is inflated by frequent bubbles).
+# min_thresh = 1e-4 (floor of the variance cut-off) is fixed: the paper's "arbitrary minimum" (p. 7-8).
 .find_ch4_bubbles <- function(t, conc, window = 10, align = "centre", prob = 0.75, min_thresh = 1e-4,
-                              merge_gap = 10, min_len = 5, noise_sd = NA_real_, alpha = 0.05) {
+                              merge_gap = 10, min_len = 5) {
   grid <- seq(0, floor(max(t)))
   at <- pmin(round(t), max(grid)) + 1  # grid point of each reading
   conc <- stats::approx(t, conc, grid)$y
@@ -59,23 +44,7 @@
   if (n < window + 1) return(flag[at])
   z <- conc / mean(conc)
   first <- seq_len(n - window + 1)  # first reading of each window
-  if (is.na(noise_sd)) {
-    v <- vapply(first, function(s) stats::var(z[s:(s + window - 1)]), numeric(1))
-  } else {
-    if (stats::median(diff(t)) > 1 + 1e-6)
-      stop("bubble_floor = \"noise\" needs readings logged at 1 s or faster (the median interval is ",
-           signif(stats::median(diff(t)), 3), " s).", call. = FALSE)
-    x <- seq_len(window); df <- window - 2
-    v <- vapply(first, function(s) sum(stats::resid(stats::lm.fit(cbind(1, x), z[s:(s + window - 1)]))^2) / df,
-                numeric(1))
-    min_thresh <- (noise_sd / abs(mean(conc)))^2 * stats::qchisq(1 - alpha / length(first), df) / df
-    seen <- sqrt(stats::median(v) / (stats::qchisq(0.5, df) / df)) * abs(mean(conc))
-    if (length(first) >= 120 && seen > 1.1 * noise_sd)
-      warning("Bubble floor: the within-window residual spread of a closure (about ", signif(seen, 2),
-              ") is above 1.1 x instrument_precision (", signif(noise_sd, 2), "): the precision may be ",
-              "below the real noise (bubbles flagged falsely), or the closure has many bubbles.",
-              call. = FALSE)
-  }
+  v <- vapply(first, function(s) stats::var(z[s:(s + window - 1)]), numeric(1))
   owner <- first + switch(align, centre = window %/% 2, start = 0, end = window - 1)
   r <- rle(v > max(min_thresh, stats::quantile(v, prob)))
   # merge high runs split by fewer than merge_gap low windows
@@ -160,7 +129,7 @@
 
 # Total / diffusion / ebullition split of one CH4 closure (Minaudo et al. 2026, pp. 3-4).
 # time in seconds; t_ref = placement time for early_from = "placement".
-.separate_ch4 <- function(time, conc, opt, t_ref = NA_real_, noise_sd = NA_real_) {
+.separate_ch4 <- function(time, conc, opt, t_ref = NA_real_) {
   out <- data.frame(total = NA_real_, diffusion = NA_real_, ebullition = NA_real_,
                     n_bubbles = NA_integer_, ch4_flag = "too few readings",
                     diff_r2 = NA_real_, diff_rmse = NA_real_, diff_cor = NA_real_, diff_se = NA_real_,
@@ -176,9 +145,7 @@
   tt <- time - time[1]
 
   flag <- .find_ch4_bubbles(tt, conc, opt$bubble_window, opt$bubble_align, opt$bubble_prob,
-                            merge_gap = opt$merge_gap, min_len = opt$min_len,
-                            noise_sd = if (opt$bubble_floor == "noise") noise_sd else NA_real_,
-                            alpha = opt$bubble_alpha)
+                            merge_gap = opt$merge_gap, min_len = opt$min_len)
   spans <- function(f) {
     r <- rle(f); e <- cumsum(r$lengths); s <- e - r$lengths + 1
     if (any(f)) paste(sprintf("%g-%g", round(tt[s[r$values]], 1), round(tt[e[r$values]], 1)),

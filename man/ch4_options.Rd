@@ -65,27 +65,5 @@ Only for \code{bubble_detection = TRUE} (always checked): a named list
     \item{\code{min_diffusion_s}}{Shortest diffusion segment, in seconds. Default 20 (the
       code archive's \code{length.min}); FluxSeparator needs more than 50 readings (Sø et al.
       2024, p. 8).}
-    \item{\code{bubble_floor}}{\code{"fixed"} (default) flags windows whose variance of
-      \code{conc / mean(conc)} exceeds the larger of 1e-4 (the paper's "arbitrary minimum") and
-      the \code{bubble_prob} percentile. \code{"noise"} replaces the 1e-4 with a floor from the
-      analyser precision (\code{instrument_precision}, or the \code{<ghg>_prec} column), and uses
-      the residual variance of a straight line fitted in each window as the window statistic, so a
-      steady rise is not counted as variance. The floor is
-      \eqn{(\sigma / \bar c)^2 \chi^2_{1 - \alpha/m,\, w - 2} / (w - 2)}{(sigma / mean)^2 * qchisq(1 - alpha / m, w - 2) / (w - 2)}
-      for \eqn{m} windows of \eqn{w = } \code{bubble_window} readings: the residual sum of squares of a
-      straight-line fit to normal noise is \eqn{\sigma^2 \chi^2_{w-2}}{sigma^2 * chi-square(w - 2)}
-      (Casella and Berger 2002, Section 5.3 and chapter 11), and \eqn{\alpha/m} is the Bonferroni
-      adjustment (Bonferroni inequality, as applied to multiple comparisons by Dunn 1961; the windows
-      overlap, so \code{bubble_alpha} is an upper bound on the family-wise error). This departs from the
-      paper and has been checked only on simulated closures (normal and AR(1) noise, step bubbles,
-      1 Hz logging, fluxes up to 2 ppb/s). It assumes white noise at the logging rate, so readings
-      logged slower than 1 s stop with an error, and it assumes \code{instrument_precision} is not
-      below the real noise (one positive number is required); an assumed precision 20\% too low raised
-      false bubbles in simulation. For closures with at least 120 windows a warning is given when the
-      within-window residual spread is above 1.1 times \code{instrument_precision} (1.1 is aelab's
-      choice); it is unreliable for short closures, autocorrelated noise and frequent bubbles. Needs
-      \code{bubble_window >= 3}.}
-    \item{\code{bubble_alpha}}{Family-wise level of the \code{"noise"} floor, default 0.05
-      (convention).}
   }
 }
