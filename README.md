@@ -64,15 +64,15 @@ vignette("aelab")
 
 ```mermaid
 flowchart TD
-  a1["Analyzer file<br/>LI-COR .data, Excel export or LGR"]
-  a2["<b>tidy_ghg_analyzer</b><br/>then <b>convert_time</b>"]
+  a1["Analyzer file<br>LI-COR .data, Excel export or LGR"]
+  a2["<b>tidy_ghg_analyzer</b><br>then <b>convert_time</b>"]
   f1["Field sheet"]
-  f2["<b>make_reference</b><br/>gives reference_df"]
-  r1["<b>calculate_regression</b><br/>window, fit, QC flag"]
-  t1["<b>Regression table</b><br/>slope, flag, ..."]
-  rv["<b>CH4 review</b><br/>optional, see sections 4 and 5"]
-  fx["<b>calculate_ghg_flux</b><br/>unit = mmol m-2 h-1"]
-  cv["<b>convert_ghg_unit</b><br/><b>calculate_total_co2e</b>"]
+  f2["<b>make_reference</b><br>gives reference_df"]
+  r1["<b>calculate_regression</b><br>window, fit, QC flag"]
+  t1["<b>Regression table</b><br>slope, flag, ..."]
+  rv["<b>CH4 review</b><br>optional, see sections 4 and 5"]
+  fx["<b>calculate_ghg_flux</b><br>unit = mmol m-2 h-1"]
+  cv["<b>convert_ghg_unit</b><br><b>calculate_total_co2e</b>"]
   a1 --> a2 --> r1
   f1 --> f2 --> r1
   r1 --> t1
@@ -85,25 +85,22 @@ flowchart TD
 
 classDef input fill:#e5e7eb,stroke:#6b7280,color:#111,stroke-width:1.5px
 classDef func fill:#dbeafe,stroke:#2563eb,color:#111,stroke-width:1.5px
-classDef dec fill:#fed7aa,stroke:#ea580c,color:#111,stroke-width:1.5px
 classDef tbl fill:#dcfce7,stroke:#16a34a,color:#111,stroke-width:1.5px
-classDef bad fill:#fecaca,stroke:#dc2626,color:#111,stroke-width:1.5px
-classDef man fill:#e9d5ff,stroke:#9333ea,color:#111,stroke-width:1.5px
 ```
 
 ## 1 Window selection
 
 ```mermaid
 flowchart TD
-  r1["<b>calculate_regression</b><br/>window_type"]
+  r1["<b>calculate_regression</b><br>window_type"]
   dw{"window_type?"}
-  wf["<b>fixed</b><br/>start = reference time + start_offset_s<br/>length = duration_minutes"]
-  ws["<b>sliding</b><br/>all windows of num_rows readings<br/>keep the highest r_square"]
-  wp1["<b>pareto</b> (experimental)<br/>grid of deadband and cutoff<br/>window >= min_window_size"]
-  wp2["Fit each candidate, score it on rmse above noise<br/>and approximate slope SE, fixed scales<br/>pick the front member closest to the ideal"]
+  wf["<b>fixed</b><br>start = reference time + start_offset_s<br>length = duration_minutes"]
+  ws["<b>sliding</b><br>all windows of num_rows readings<br>keep the highest r_square"]
+  wp1["<b>pareto</b> (experimental)<br>grid of deadband and cutoff<br>window >= min_window_size"]
+  wp2["Fit each candidate, score it on rmse above noise<br>and approximate slope SE, fixed scales<br>pick the front member closest to the ideal"]
   nd["flag = no_data"]
   di["flag = discard"]
-  w["<b>Window</b><br/>start_time, end_time, n_obs<br/>pareto adds deadband, cutoff,<br/>n_candidates"]
+  w["<b>Window</b><br>start_time, end_time, n_obs<br>pareto adds deadband, cutoff,<br>n_candidates"]
   r1 --> dw
   dw -->|"fixed"| wf --> w
   dw -->|"sliding"| ws --> w
@@ -116,12 +113,10 @@ flowchart TD
   class w tbl
   class nd,di bad
 
-classDef input fill:#e5e7eb,stroke:#6b7280,color:#111,stroke-width:1.5px
 classDef func fill:#dbeafe,stroke:#2563eb,color:#111,stroke-width:1.5px
 classDef dec fill:#fed7aa,stroke:#ea580c,color:#111,stroke-width:1.5px
 classDef tbl fill:#dcfce7,stroke:#16a34a,color:#111,stroke-width:1.5px
 classDef bad fill:#fecaca,stroke:#dc2626,color:#111,stroke-width:1.5px
-classDef man fill:#e9d5ff,stroke:#9333ea,color:#111,stroke-width:1.5px
 ```
 
 | Setting | Default |
@@ -137,21 +132,21 @@ classDef man fill:#e9d5ff,stroke:#9333ea,color:#111,stroke-width:1.5px
 
 ```mermaid
 flowchart TD
-  w["<b>Window</b><br/>readings of the closure"]
+  w["<b>Window</b><br>readings of the closure"]
   d1{"n_obs >= need?"}
   nd["flag = no_data"]
   da{"fit_type = auto?"}
-  au["<b>Auto model choice</b> (section 3)<br/>linear, quadratic or exp_tz<br/>by AICc and kmax"]
-  fit["<b>Fit the model</b><br/>slope, slope_se, r_square, rmse<br/>fit_used, g_factor if not linear"]
+  au["<b>Auto model choice</b> (section 3)<br>linear, quadratic or exp_tz<br>by AICc and kmax"]
+  fit["<b>Fit the model</b><br>slope, slope_se, r_square, rmse<br>fit_used, g_factor if not linear"]
   d2{"abs correlation >= cor_threshold?"}
-  ze["flag = zero<br/>also when correlation is NA"]
+  ze["flag = zero<br>also when correlation is NA"]
   d3{"r_square >= r2_threshold?"}
   di["flag = discard"]
-  dg{"g_factor_threshold set and<br/>abs g_factor above it?"}
+  dg{"g_factor_threshold set and<br>abs g_factor above it?"}
   d4{"bubble_detection = TRUE?"}
-  sp["<b>CH4 split</b> (section 4)<br/>total, diffusion, ebullition, ch4_flag<br/>flag, r_square recomputed on the diffusion line<br/>NA if total only, g_factor = NA"]
-  out["<b>Regression table</b><br/>flag: ok, zero, discard, no_data or NA<br/>below_mdf, data_ratio, start_conc, h2o_start"]
-  qc["<b>plot_ghg_flux</b><br/>title = model, RMSE, n<br/>colours by flag"]
+  sp["<b>CH4 split</b> (section 4)<br>total, diffusion, ebullition, ch4_flag<br>flag, r_square recomputed on the diffusion line<br>NA if total only, g_factor = NA"]
+  out["<b>Regression table</b><br>flag: ok, zero, discard, no_data or NA<br>below_mdf, data_ratio, start_conc, h2o_start"]
+  qc["<b>plot_ghg_flux</b><br>title = model, RMSE, n<br>colours by flag"]
   w --> d1
   d1 -->|"no"| nd --> out
   d1 -->|"yes"| da
@@ -172,12 +167,10 @@ flowchart TD
   class au,fit,sp,qc func
   class nd,ze,di bad
 
-classDef input fill:#e5e7eb,stroke:#6b7280,color:#111,stroke-width:1.5px
 classDef func fill:#dbeafe,stroke:#2563eb,color:#111,stroke-width:1.5px
 classDef dec fill:#fed7aa,stroke:#ea580c,color:#111,stroke-width:1.5px
 classDef tbl fill:#dcfce7,stroke:#16a34a,color:#111,stroke-width:1.5px
 classDef bad fill:#fecaca,stroke:#dc2626,color:#111,stroke-width:1.5px
-classDef man fill:#e9d5ff,stroke:#9333ea,color:#111,stroke-width:1.5px
 ```
 
 | Setting | Default |
@@ -195,13 +188,13 @@ Flagged rows stay in the table and `calculate_ghg_flux()` does not filter on `fl
 
 ```mermaid
 flowchart TD
-  s["fit_type = auto<br/>window readings"]
-  lin["<b>Linear baseline</b><br/>slope_lm, best = linear<br/>kmax = abs of slope_lm / instrument_precision"]
-  dq{"quadratic: AICc lower and<br/>curvature opposes the slope?"}
+  s["fit_type = auto<br>window readings"]
+  lin["<b>Linear baseline</b><br>slope_lm, best = linear<br>kmax = abs of slope_lm / instrument_precision"]
+  dq{"quadratic: AICc lower and<br>curvature opposes the slope?"}
   qa["best = quadratic"]
-  de{"exp_tz: b within kmax, curve<br/>levels off and AICc lower than best?"}
+  de{"exp_tz: b within kmax, curve<br>levels off and AICc lower than best?"}
   ee["best = exp_tz"]
-  res["<b>Result</b><br/>fit_used, slope, slope_lm<br/>g_factor = slope / slope_lm if not linear"]
+  res["<b>Result</b><br>fit_used, slope, slope_lm<br>g_factor = slope / slope_lm if not linear"]
   s --> lin --> dq
   dq -->|"yes"| qa --> de
   dq -->|"no"| de
@@ -212,12 +205,9 @@ flowchart TD
   class dq,de dec
   class res tbl
 
-classDef input fill:#e5e7eb,stroke:#6b7280,color:#111,stroke-width:1.5px
 classDef func fill:#dbeafe,stroke:#2563eb,color:#111,stroke-width:1.5px
 classDef dec fill:#fed7aa,stroke:#ea580c,color:#111,stroke-width:1.5px
 classDef tbl fill:#dcfce7,stroke:#16a34a,color:#111,stroke-width:1.5px
-classDef bad fill:#fecaca,stroke:#dc2626,color:#111,stroke-width:1.5px
-classDef man fill:#e9d5ff,stroke:#9333ea,color:#111,stroke-width:1.5px
 ```
 
 AICc = n ln(RSS / n) + 2k + 2k(k + 1) / (n - k - 1), with k the fitted parameters plus 1 (Kutzbach et al. 2007; Leiber-Sauheitl et al. 2014). `kmax` follows Hüppi et al. 2018. A curve that bends the same way as the slope is rejected (Levy et al. 2011). `g_factor_threshold` is described in section 2.
@@ -226,25 +216,25 @@ AICc = n ln(RSS / n) + 2k + 2k(k + 1) / (n - k - 1), with k the fitted parameter
 
 ```mermaid
 flowchart TD
-  s0["<b>CH4 readings</b><br/>final window, in time order<br/>duplicate times dropped"]
+  s0["<b>CH4 readings</b><br>final window, in time order<br>duplicate times dropped"]
   d0{"at least 20 readings?"}
-  tf["ch4_flag = too few readings<br/>slopes NA"]
-  b1["<b>Find bubbles</b><br/>1 s grid, z = conc / mean<br/>variance of z in windows of bubble_window<br/>high if above max of 1e-4 and the bubble_prob quantile<br/>merge runs split by fewer than merge_gap windows<br/>drop runs shorter than min_len"]
+  tf["ch4_flag = too few readings<br>slopes NA"]
+  b1["<b>Find bubbles</b><br>1 s grid, z = conc / mean<br>variance of z in windows of bubble_window<br>high if above max of 1e-4 and the bubble_prob quantile<br>merge runs split by fewer than merge_gap windows<br>drop runs shorter than min_len"]
   d1{"any bubble?"}
-  nb["ch4_flag = no bubble<br/>slope = linear slope of the window<br/>ebullition = 0"]
-  b3["<b>Two-point total</b><br/>smoothed series, spar<br/>c0 = low of first 30 s, c1 = high of last 30 s<br/>total = (c1 - c0) / duration"]
-  d2{"first bubble within early_s<br/>of the start?"}
+  nb["ch4_flag = no bubble<br>slope = linear slope of the window<br>ebullition = 0"]
+  b3["<b>Two-point total</b><br>smoothed series, spar<br>c0 = low of first 30 s, c1 = high of last 30 s<br>total = (c1 - c0) / duration"]
+  d2{"first bubble within early_s<br>of the start?"}
   eb["ch4_flag = early bubble: total only"]
-  b4["<b>Clean the bubble set</b><br/>min_rise: drop bubbles that rise by that much or less<br/>none left: no bubble, rises <= min_rise<br/>bubble_pad widens each bubble"]
-  b6["<b>Diffusion segment</b><br/>trim_to_min drops readings up to the lowest in the first half<br/>first run of clean readings, at least min_diffusion_s<br/>grow it until adj R2 >= 0.7, p < 0.05, slope > 0<br/>a run starting before the first bubble may be negative (uptake)"]
+  b4["<b>Clean the bubble set</b><br>min_rise: drop bubbles that rise by that much or less<br>none left: no bubble, rises <= min_rise<br>bubble_pad widens each bubble"]
+  b6["<b>Diffusion segment</b><br>trim_to_min drops readings up to the lowest in the first half<br>first run of clean readings, at least min_diffusion_s<br>grow it until adj R2 >= 0.7, p < 0.05, slope > 0<br>a run starting before the first bubble may be negative (uptake)"]
   d5{"a clean run long enough?"}
-  tl["ch4_flag = no linear diffusion segment<br/>total only"]
-  b7["<b>Split</b><br/>diffusion = slope of the segment<br/>ebullition = total - diffusion<br/>negative: neg_ebullition = zero, keep or na"]
-  d6{"any review label?<br/>diffusion above total<br/>ebullition below diffusion + SE<br/>no passing segment<br/>diffusion after the first bubble"}
+  tl["ch4_flag = no linear diffusion segment<br>total only"]
+  b7["<b>Split</b><br>diffusion = slope of the segment<br>ebullition = total - diffusion<br>negative: neg_ebullition = zero, keep or na"]
+  d6{"any review label?<br>diffusion above total<br>ebullition below diffusion + SE<br>no passing segment<br>diffusion after the first bubble"}
   rn["ch4_flag = the labels"]
   ok["ch4_flag = ok"]
-  rv["review_needed = TRUE<br/>slope = slope_total"]
-  au["review_needed = FALSE<br/>ch4_decision = auto"]
+  rv["review_needed = TRUE<br>slope = slope_total"]
+  au["review_needed = FALSE<br>ch4_decision = auto"]
   s0 --> d0
   d0 -->|"no"| tf --> rv
   d0 -->|"yes"| b1 --> d1
@@ -262,12 +252,10 @@ flowchart TD
   class tf,eb,tl,rn,rv bad
   class nb,ok,au tbl
 
-classDef input fill:#e5e7eb,stroke:#6b7280,color:#111,stroke-width:1.5px
 classDef func fill:#dbeafe,stroke:#2563eb,color:#111,stroke-width:1.5px
 classDef dec fill:#fed7aa,stroke:#ea580c,color:#111,stroke-width:1.5px
 classDef tbl fill:#dcfce7,stroke:#16a34a,color:#111,stroke-width:1.5px
 classDef bad fill:#fecaca,stroke:#dc2626,color:#111,stroke-width:1.5px
-classDef man fill:#e9d5ff,stroke:#9333ea,color:#111,stroke-width:1.5px
 ```
 
 | `ch4_options` | Default |
@@ -285,17 +273,17 @@ Fixed in the code, not options: variance floor 1e-4, at least 20 readings, adj R
 
 ```mermaid
 flowchart TD
-  out["<b>Regression table</b><br/>bubble_detection = TRUE"]
-  tp["<b>ch4_review_template</b><br/>rows with review_needed = TRUE<br/>empty decision column"]
-  pl["<b>plot_ghg_flux</b><br/>second_gas = CO2<br/>visual check"]
-  mn["<b>Manual decision</b><br/>one per closure"]
-  ap["<b>apply_ch4_review</b><br/>regression_result, decisions"]
+  out["<b>Regression table</b><br>bubble_detection = TRUE"]
+  tp["<b>ch4_review_template</b><br>rows with review_needed = TRUE<br>empty decision column"]
+  pl["<b>plot_ghg_flux</b><br>second_gas = CO2<br>visual check"]
+  mn["<b>Manual decision</b><br>one per closure"]
+  ap["<b>apply_ch4_review</b><br>regression_result, decisions"]
   dd{"decision?"}
-  acc["accept<br/>keep the split"]
-  tot["total<br/>slope = slope_total<br/>flag, r_square, rmse, slope_se, correlation = NA"]
-  nb["not_bubble<br/>regression fit restored<br/>ebullition = 0"]
-  dis["discard<br/>flag = discard, values kept"]
-  cd["<b>ch4_decision</b><br/>the decision, unreviewed or auto"]
+  acc["accept<br>keep the split"]
+  tot["total<br>slope = slope_total<br>flag, r_square, rmse, slope_se, correlation = NA"]
+  nb["not_bubble<br>regression fit restored<br>ebullition = 0"]
+  dis["discard<br>flag = discard, values kept"]
+  cd["<b>ch4_decision</b><br>the decision, unreviewed or auto"]
   fx["<b>calculate_ghg_flux</b>"]
   out --> tp --> mn
   out --> pl
@@ -312,11 +300,9 @@ flowchart TD
   class mn man
   class acc,tot,nb,dis func
 
-classDef input fill:#e5e7eb,stroke:#6b7280,color:#111,stroke-width:1.5px
 classDef func fill:#dbeafe,stroke:#2563eb,color:#111,stroke-width:1.5px
 classDef dec fill:#fed7aa,stroke:#ea580c,color:#111,stroke-width:1.5px
 classDef tbl fill:#dcfce7,stroke:#16a34a,color:#111,stroke-width:1.5px
-classDef bad fill:#fecaca,stroke:#dc2626,color:#111,stroke-width:1.5px
 classDef man fill:#e9d5ff,stroke:#9333ea,color:#111,stroke-width:1.5px
 ```
 
