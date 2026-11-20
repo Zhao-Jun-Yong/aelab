@@ -63,7 +63,7 @@ vignette("aelab")
 ## Overview
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "13px"}, "flowchart": {"padding": 30}}}%%
+%%{init: {"themeVariables": {"fontSize": "11px"}, "flowchart": {"padding": 20, "wrappingWidth": 500}}}%%
 flowchart TD
   a1["Analyzer file<br>LI-COR .data, Excel export or LGR"]
   a2["<b>tidy_ghg_analyzer</b><br>then <b>convert_time</b>"]
@@ -92,7 +92,7 @@ classDef tbl fill:#dcfce7,stroke:#16a34a,color:#111,stroke-width:1.5px
 ## 1 Window selection
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "13px"}, "flowchart": {"padding": 30}}}%%
+%%{init: {"themeVariables": {"fontSize": "11px"}, "flowchart": {"padding": 20, "wrappingWidth": 500}}}%%
 flowchart TD
   r1["<b>calculate_regression</b><br>window_type"]
   dw{"window_type?"}
@@ -133,7 +133,7 @@ classDef bad fill:#fecaca,stroke:#dc2626,color:#111,stroke-width:1.5px
 ## 2 Fit and QC
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "13px"}, "flowchart": {"padding": 30}}}%%
+%%{init: {"themeVariables": {"fontSize": "11px"}, "flowchart": {"padding": 20, "wrappingWidth": 500}}}%%
 flowchart TD
   w["<b>Window</b><br>readings of the closure"]
   d1{"n_obs >= need?"}
@@ -190,7 +190,7 @@ Flagged rows stay in the table and `calculate_ghg_flux()` does not filter on `fl
 ## 3 Auto model choice (`fit_type = "auto"`)
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "13px"}, "flowchart": {"padding": 30}}}%%
+%%{init: {"themeVariables": {"fontSize": "11px"}, "flowchart": {"padding": 20, "wrappingWidth": 500}}}%%
 flowchart TD
   s["fit_type = auto<br>window readings"]
   lin["<b>Linear baseline</b><br>slope_lm, best = linear<br>kmax = abs of slope_lm / instrument_precision"]
@@ -219,7 +219,7 @@ AICc = n ln(RSS / n) + 2k + 2k(k + 1) / (n - k - 1), with k the fitted parameter
 ## 4 CH4 bubble detection
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "13px"}, "flowchart": {"padding": 30}}}%%
+%%{init: {"themeVariables": {"fontSize": "11px"}, "flowchart": {"padding": 20, "wrappingWidth": 500}}}%%
 flowchart TD
   s0["<b>CH4 readings</b><br>final window, in time order<br>duplicate times dropped"]
   d0{"at least 20 readings?"}
@@ -277,7 +277,7 @@ Fixed in the code, not options: variance floor 1e-4, at least 20 readings, adj R
 ## 5 CH4 bubble review (optional)
 
 ```mermaid
-%%{init: {"themeVariables": {"fontSize": "13px"}, "flowchart": {"padding": 30}}}%%
+%%{init: {"themeVariables": {"fontSize": "11px"}, "flowchart": {"padding": 20, "wrappingWidth": 500}}}%%
 flowchart TD
   out["<b>Regression table</b><br>bubble_detection = TRUE"]
   tp["<b>ch4_review_template</b><br>rows with review_needed = TRUE<br>empty decision column"]
