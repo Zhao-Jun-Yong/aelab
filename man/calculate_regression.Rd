@@ -84,7 +84,8 @@ Measurements below this have no detectable trend and are flagged \code{"zero"}. 
 \item{instrument_precision}{Optional. Analyser precision (\eqn{1\sigma}{1 sigma}) in the same concentration unit as
 the \code{ghg} column (ppb for LI-COR CH4/N2O, ppm for CO2). Used in three ways:
 (1) minimum-detectable-slope check - \code{below_mdf} is \code{TRUE} when the absolute slope
-falls below \code{instrument_precision / window_duration_s}; the flag is not changed, because
+falls below \code{instrument_precision / (window_duration_s * sqrt(n_obs))}, Maier et al. (2022, Eq. 4) without
+its flux term (\code{n_obs} replaces their closure time divided by the sampling period); the flag is not changed, because
 low fluxes with a good fit are kept (Gaudard et al. 2025; Maier et al. 2022); (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
 (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
 fluxes permit more curvature and near-detection-limit measurements are kept linear; (3) the slope-error score of \code{window_type = "pareto"}.}

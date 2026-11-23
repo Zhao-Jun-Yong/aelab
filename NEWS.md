@@ -1,5 +1,10 @@
 # aelab (development version)
 
+## `below_mdf` follows Maier et al. (2022) Eq. 4
+
+* `below_mdf` is now `TRUE` when the absolute slope is below `instrument_precision / (window_duration_s * sqrt(n_obs))`: Maier et al. (2022, Eq. 4) with the flux term divided out, and `n_obs` (readings in the fitted window) in place of their closure time divided by the sampling period. It was `instrument_precision / window_duration_s` (Christiansen et al. 2015). The threshold falls by `sqrt(n_obs)` (about 17 for 300 readings), so fewer closures are marked. Fluxes and `flag` do not change. For CH4 closures with a bubble, `n_obs` is the readings in the closure's final window.
+* The `sqrt(n_obs)` assumes independent readings, which Maier et al. do not state. On the flat N2O closures of the 2026-11-07 PD campaign the readings were nearly independent (lag-1 correlation about 0.2). CH4 and CO2 could not be judged, because a linear fit leaves curvature in the residuals.
+
 ## Pareto window search cut down
 
 * `window_type = "pareto"` no longer reports an uncertainty interval. Removed: the residual bootstrap

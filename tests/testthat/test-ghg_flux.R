@@ -183,7 +183,8 @@ test_that("calculate_regression flags flat noisy signal as zero", {
 
 test_quiet("instrument_precision marks below_mdf without overriding the flag", {
   elapsed <- seq(0, 419)
-  # slope = 0.0001 ppm/s; min detectable = 0.1 ppm / 300 s ≈ 0.000333 ppm/s > 0.0001
+  # slope = 0.0001 ppm/s; 419 s window, 420 readings: min detectable = precision / (419 * sqrt(420)),
+  # which is 0.000116 ppm/s for precision 1 (> slope, so below_mdf is TRUE) and 0.0000116 for 0.1 (FALSE)
   data <- data.frame(
     real_datetime = seq.POSIXt(from = as.POSIXct("2024-12-16 12:00:00"),
                                by = "sec", length.out = 420),
@@ -199,11 +200,16 @@ test_quiet("instrument_precision marks below_mdf without overriding the flag", {
   result_with_prec <- calculate_regression(data, ref, "CH4",
                                            reference_time = "date_time",
                                            site = "site", analyzer_code = "TEST",
-                                           instrument_precision = 0.1)
+                                           instrument_precision = 1)
+  result_small_prec <- calculate_regression(data, ref, "CH4",
+                                            reference_time = "date_time",
+                                            site = "site", analyzer_code = "TEST",
+                                            instrument_precision = 0.1)
   expect_equal(result_no_prec$flag, "ok")
   expect_true(is.na(result_no_prec$below_mdf))
   expect_equal(result_with_prec$flag, "ok")
   expect_true(result_with_prec$below_mdf)
+  expect_false(result_small_prec$below_mdf)
 })
 
 test_that("calculate_regression exp_tz fits exponential signal and returns positive slope", {

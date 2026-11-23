@@ -118,7 +118,8 @@ NULL
 #' @param instrument_precision Optional. Analyser precision (\eqn{1\sigma}{1 sigma}) in the same concentration unit as
 #'   the \code{ghg} column (ppb for LI-COR CH4/N2O, ppm for CO2). Used in three ways:
 #'   (1) minimum-detectable-slope check - \code{below_mdf} is \code{TRUE} when the absolute slope
-#'   falls below \code{instrument_precision / window_duration_s}; the flag is not changed, because
+#'   falls below \code{instrument_precision / (window_duration_s * sqrt(n_obs))}, Maier et al. (2022, Eq. 4) without
+#'   its flux term (\code{n_obs} replaces their closure time divided by the sampling period); the flag is not changed, because
 #'   low fluxes with a good fit are kept (Gaudard et al. 2025; Maier et al. 2022); (2) kappamax for \code{fit_type = "auto"} - following Hueppi et al.
 #'   (2018), \eqn{\kappa_{max} = |\text{slope}_{lm}| / \text{precision}}, so that stronger
 #'   fluxes permit more curvature and near-detection-limit measurements are kept linear; (3) the slope-error score of \code{window_type = "pareto"}.
@@ -454,7 +455,7 @@ calculate_regression <- function(data, reference_df, ghg,
     # are kept as such (Gaudard et al. 2025, p. 4; fluxible SI Table A1) and sub-MDF fluxes
     # "should not be treated as zero fluxes or be discarded" (Maier et al. 2022, p. 457).
     below_mdf <- .below_mdf(fit$slope, as.numeric(difftime(fit$end_dt, fit$start_dt, units = "secs")),
-                            instrument_precision)
+                            fit$n_obs, instrument_precision)
 
     # g-factor: ratio of chosen slope to linear baseline slope (auto mode only).
     # Values far from 1 indicate the nonlinear model diverges strongly from linear.
@@ -700,11 +701,15 @@ calculate_regression <- function(data, reference_df, ghg,
     if (r2 >= r2_threshold) "ok" else "discard"
 }
 
-# TRUE when |slope| is below precision / duration (the minimum detectable slope); NA without a
-# precision, a slope or a positive duration
-.below_mdf <- function(slope, duration_s, instrument_precision) {
-  if (is.null(instrument_precision) || is.na(slope) || !isTRUE(duration_s > 0)) return(NA)
-  abs(slope) < instrument_precision / duration_s
+# TRUE when |slope| is below precision / (duration * sqrt(n)), the minimum detectable slope: Maier et al.
+# (2022, Eq. 4) with the flux term V p / (A R T) divided out. Maier's t_c / p_s is replaced by the readings
+# counted in the fitted window (n) and t_c by the window's duration. NA without a precision, a slope,
+# a positive duration or at least one reading.
+# shortcut: the sqrt(n) assumes independent readings (Maier does not state it); true for the flat N2O
+# closures tested on 2026-11-07, not tested for CH4/CO2 (linear residuals there hold curvature).
+.below_mdf <- function(slope, duration_s, n, instrument_precision) {
+  if (is.null(instrument_precision) || is.na(slope) || !isTRUE(duration_s > 0) || !isTRUE(n > 0)) return(NA)
+  abs(slope) < instrument_precision / (duration_s * sqrt(n))
 }
 
 # CH4 split of one closure's final window (.separate_ch4) merged with its regression result.
@@ -737,7 +742,7 @@ calculate_regression <- function(data, reference_df, ghg,
       cor <- split$diff_cor
       flag <- if (is.na(split$diff_r2)) NA_character_ else .qc_flag(cor, r_square, cor_threshold, r2_threshold)
     }
-    if (!is.null(instrument_precision)) below_mdf <- .below_mdf(slope, split$total_s, instrument_precision)
+    if (!is.null(instrument_precision)) below_mdf <- .below_mdf(slope, split$total_s, nrow(win), instrument_precision)
   }
   list(split = split, reg_qc = reg_qc, slope = slope, slope_se = slope_se, r_square = r_square,
        rmse = rmse, cor = cor, flag = flag, g_factor = g_factor, below_mdf = below_mdf)
