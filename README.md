@@ -32,6 +32,7 @@
 - Gaudard, J., Telford, R. J., Chacon-Labella, J., Dawson, H. R., Enquist, B. J., Töpper, J. P., Trepel, J., Vandvik, V., Baumane, M., Birkeli, K., Holle, M. J. M., Hupp, J. R., Santos-Andrade, P. E., Satriawan, T. W., & Halbritter, A. H. (2025). fluxible: An R package to process ecosystem gas fluxes from closed-loop chambers in an automated and reproducible way. *Methods in Ecology and Evolution*, 16(11), 2560–2568. https://doi.org/10.1111/2041-210X.70161
 - Kobayashi, A. N. A., Roques, C., Hunkeler, D., & Brunner, P. (2026). Uncertainty quantification in soil gas fluxes: Reducing the user's arbitrariness. *European Journal of Soil Science*, 77, e70415. https://doi.org/10.1111/ejss.70415
 - Jeffrey, S. W., & Humphrey, G. F. (1975). New spectrophotometric equations for determining chlorophylls a, b, c1 and c2 in higher plants, algae and natural phytoplankton. *Biochemie und Physiologie der Pflanzen*, 167(2), 191–194. https://doi.org/10.1016/S0015-3796(17)30778-3
+- Rheault, K., Christiansen, J. R., & Larsen, K. S. (2024). goFlux: A user-friendly way to calculate GHG fluxesyourself, regardless of user experience. Journal of Open Source Software, 9(96), 6393. https://doi.org/10.21105/joss.06393
 
 # Installation
 
